@@ -21,10 +21,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform:
-          - ubuntu-24.04
-          - windows-latest
-          - macos-latest
+        include:
+          - platform: ubuntu-24.04
+            artifact_path: src-tauri/target/release/private-chat-hub-desktop
+          - platform: windows-latest
+            artifact_path: src-tauri/target/release/private-chat-hub-desktop.exe
+          - platform: macos-latest
+            artifact_path: src-tauri/target/release/private-chat-hub-desktop
 
     steps:
       - name: Checkout
@@ -57,11 +60,11 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build Tauri app
-        run: pnpm tauri build --bundles app
+        run: pnpm tauri build --no-bundle
 
-      - name: Upload bundle artifacts
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bundle-${{ matrix.platform }}
-          path: src-tauri/target/release/bundle/**
+          name: binary-${{ matrix.platform }}
+          path: ${{ matrix.artifact_path }}
           if-no-files-found: error
