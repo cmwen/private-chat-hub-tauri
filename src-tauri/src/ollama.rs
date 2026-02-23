@@ -71,6 +71,18 @@ impl OllamaClient {
 
     /// Send a chat message with streaming — collects chunks and returns them
     pub async fn chat_stream(&self, request: &OllamaChatRequest) -> Result<Vec<OllamaChatResponse>, String> {
+        self.chat_stream_with_callback(request, |_| {}).await
+    }
+
+    /// Send a chat message with streaming and invoke callback for each parsed chunk
+    pub async fn chat_stream_with_callback<F>(
+        &self,
+        request: &OllamaChatRequest,
+        mut on_chunk: F,
+    ) -> Result<Vec<OllamaChatResponse>, String>
+    where
+        F: FnMut(&OllamaChatResponse),
+    {
         let url = format!("{}/api/chat", self.base_url);
         let mut req = request.clone();
         req.stream = Some(true);
@@ -104,6 +116,7 @@ impl OllamaClient {
                 }
 
                 if let Ok(response) = serde_json::from_str::<OllamaChatResponse>(&line) {
+                    on_chunk(&response);
                     responses.push(response);
                 }
             }
@@ -113,6 +126,7 @@ impl OllamaClient {
         let remaining = buffer.trim();
         if !remaining.is_empty() {
             if let Ok(response) = serde_json::from_str::<OllamaChatResponse>(remaining) {
+                on_chunk(&response);
                 responses.push(response);
             }
         }
