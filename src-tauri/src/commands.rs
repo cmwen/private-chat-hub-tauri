@@ -2,6 +2,7 @@ use crate::models::*;
 use crate::ollama::{OllamaClient, messages_to_ollama};
 use std::sync::Mutex;
 use tauri::State;
+use tauri::{AppHandle, Emitter};
 
 pub struct AppState {
     pub ollama_client: Mutex<OllamaClient>,
@@ -99,12 +100,14 @@ pub async fn delete_model(
 /// Send a chat message and get response
 #[tauri::command]
 pub async fn send_message(
+    app: AppHandle,
     state: State<'_, AppState>,
     model: String,
     messages: Vec<Message>,
     system_prompt: Option<String>,
     parameters: Option<ModelParameters>,
     stream: Option<bool>,
+    request_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let ollama = state.ollama_client.lock().map_err(|e| e.to_string())?;
     let params = parameters.unwrap_or_default();
@@ -124,22 +127,55 @@ pub async fn send_message(
     };
 
     if stream.unwrap_or(false) {
-        // Streaming: collect all chunks and return full content
-        let chunks = ollama.chat_stream(&request).await?;
         let mut full_content = String::new();
         let mut eval_count = 0u32;
         let mut total_duration = 0u64;
 
-        for chunk in &chunks {
+        let request_id_for_emit = request_id.clone();
+
+        let streaming_result = ollama.chat_stream_with_callback(&request, |chunk| {
             if let Some(msg) = &chunk.message {
                 full_content.push_str(&msg.content);
+                if let Some(req_id) = &request_id_for_emit {
+                    let _ = app.emit("chat_stream_chunk", serde_json::json!({
+                        "requestId": req_id,
+                        "content": msg.content,
+                        "done": false,
+                    }));
+                }
             }
+
             if let Some(ec) = chunk.eval_count {
                 eval_count = ec;
             }
             if let Some(td) = chunk.total_duration {
                 total_duration = td;
             }
+        }).await;
+
+        if let Err(error) = streaming_result {
+            let error_message = error.to_string();
+
+            if let Some(req_id) = request_id {
+                let _ = app.emit("chat_stream_chunk", serde_json::json!({
+                    "requestId": req_id,
+                    "content": "",
+                    "done": true,
+                    "error": error_message,
+                }));
+            }
+
+            return Err(error_message);
+        }
+
+        if let Some(req_id) = request_id {
+            let _ = app.emit("chat_stream_chunk", serde_json::json!({
+                "requestId": req_id,
+                "content": "",
+                "done": true,
+                "evalCount": eval_count,
+                "totalDuration": total_duration,
+            }));
         }
 
         Ok(serde_json::json!({

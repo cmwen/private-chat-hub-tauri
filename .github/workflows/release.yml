@@ -1,22 +1,17 @@
-name: Build Cross-Platform
+name: Release
 
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
-  pull_request:
+    tags:
+      - "v*"
 
 permissions:
-  contents: read
-
-concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: true
+  contents: write
 
 jobs:
-  build:
-    name: Build (${{ matrix.platform }})
+  build-and-release:
+    name: Release (${{ matrix.platform }})
     runs-on: ${{ matrix.platform }}
     strategy:
       fail-fast: false
@@ -56,12 +51,13 @@ jobs:
       - name: Install JavaScript dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build Tauri app
-        run: pnpm tauri build
-
-      - name: Upload bundle artifacts
-        uses: actions/upload-artifact@v4
+      - name: Build and upload release artifacts
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          name: bundle-${{ matrix.platform }}
-          path: src-tauri/target/release/bundle/**
-          if-no-files-found: error
+          tagName: ${{ github.ref_name }}
+          releaseName: Private Chat Hub ${{ github.ref_name }}
+          releaseBody: Automated cross-platform release build.
+          releaseDraft: false
+          prerelease: false
