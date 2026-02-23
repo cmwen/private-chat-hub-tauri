@@ -18,6 +18,11 @@ impl AppState {
     }
 }
 
+fn get_ollama_client(state: &State<'_, AppState>) -> Result<OllamaClient, String> {
+    let client = state.ollama_client.lock().map_err(|e| e.to_string())?.clone();
+    Ok(client)
+}
+
 /// Test connection to Ollama server
 #[tauri::command]
 pub async fn test_connection(
@@ -45,7 +50,7 @@ pub async fn test_connection(
 /// Get current connection status
 #[tauri::command]
 pub async fn get_connection_status(state: State<'_, AppState>) -> Result<bool, String> {
-    let ollama = state.ollama_client.lock().map_err(|e| e.to_string())?;
+    let ollama = get_ollama_client(&state)?;
     match ollama.health_check().await {
         Ok(healthy) => {
             let mut connected = state.connected.lock().map_err(|e| e.to_string())?;
@@ -63,7 +68,7 @@ pub async fn get_connection_status(state: State<'_, AppState>) -> Result<bool, S
 /// List available models from Ollama
 #[tauri::command]
 pub async fn list_models(state: State<'_, AppState>) -> Result<Vec<OllamaModel>, String> {
-    let ollama = state.ollama_client.lock().map_err(|e| e.to_string())?;
+    let ollama = get_ollama_client(&state)?;
     ollama.list_models().await
 }
 
@@ -73,7 +78,7 @@ pub async fn show_model(
     state: State<'_, AppState>,
     model_name: String,
 ) -> Result<serde_json::Value, String> {
-    let ollama = state.ollama_client.lock().map_err(|e| e.to_string())?;
+    let ollama = get_ollama_client(&state)?;
     ollama.show_model(&model_name).await
 }
 
@@ -83,7 +88,7 @@ pub async fn pull_model(
     state: State<'_, AppState>,
     model_name: String,
 ) -> Result<String, String> {
-    let ollama = state.ollama_client.lock().map_err(|e| e.to_string())?;
+    let ollama = get_ollama_client(&state)?;
     ollama.pull_model(&model_name).await
 }
 
@@ -93,7 +98,7 @@ pub async fn delete_model(
     state: State<'_, AppState>,
     model_name: String,
 ) -> Result<(), String> {
-    let ollama = state.ollama_client.lock().map_err(|e| e.to_string())?;
+    let ollama = get_ollama_client(&state)?;
     ollama.delete_model(&model_name).await
 }
 
@@ -109,7 +114,7 @@ pub async fn send_message(
     stream: Option<bool>,
     request_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let ollama = state.ollama_client.lock().map_err(|e| e.to_string())?;
+    let ollama = get_ollama_client(&state)?;
     let params = parameters.unwrap_or_default();
 
     let ollama_messages = messages_to_ollama(&messages, system_prompt.as_deref());
@@ -206,7 +211,7 @@ pub async fn generate_title(
     model: String,
     first_message: String,
 ) -> Result<String, String> {
-    let ollama = state.ollama_client.lock().map_err(|e| e.to_string())?;
+    let ollama = get_ollama_client(&state)?;
     ollama.generate_title(&model, &first_message).await
 }
 
@@ -220,7 +225,7 @@ pub async fn compare_models(
     system_prompt: Option<String>,
     parameters: Option<ModelParameters>,
 ) -> Result<serde_json::Value, String> {
-    let ollama = state.ollama_client.lock().map_err(|e| e.to_string())?;
+    let ollama = get_ollama_client(&state)?;
     let params = parameters.unwrap_or_default();
     let ollama_messages = messages_to_ollama(&messages, system_prompt.as_deref());
 

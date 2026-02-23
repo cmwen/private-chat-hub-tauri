@@ -1,8 +1,9 @@
 use crate::models::*;
 use reqwest::Client;
 use futures::StreamExt;
-use std::time::Instant;
+use serde::Serialize;
 
+#[derive(Clone)]
 pub struct OllamaClient {
     client: Client,
     base_url: String,

@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    homecmwendevprivate_chat_hub_desktop_lib::run()
+    private_chat_hub_desktop_lib::run()
 }
