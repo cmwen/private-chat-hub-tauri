@@ -57,7 +57,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build Tauri app
-        run: pnpm tauri build
+        run: pnpm tauri build --bundles app
 
       - name: Upload bundle artifacts
         uses: actions/upload-artifact@v4

@@ -5,6 +5,11 @@ description = "Universal AI Chat Platform for Desktop - Privacy-first chat with 
 authors = ["cmwen"]
 edition = "2021"
 
+[package.metadata.winres]
+ProductName = "Private Chat Hub"
+FileDescription = "Private Chat Hub Desktop"
+OriginalFilename = "Private Chat Hub.exe"
+
 [lib]
 name = "private_chat_hub_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
