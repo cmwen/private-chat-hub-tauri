@@ -161,7 +161,7 @@ pub async fn send_message(
                     "requestId": req_id,
                     "content": "",
                     "done": true,
-                    "error": error_message,
+                    "error": &error_message,
                 }));
             }
 
