@@ -33,7 +33,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
