@@ -181,8 +181,8 @@ const initStreamingListener = () => {
             ),
           };
         }),
-        isSending: false,
-        isStreaming: false,
+        sendingConversationIds: (() => { const ns = new Set(state.sendingConversationIds); ns.delete(stream.conversationId); return ns; })(),
+        streamingConversationIds: (() => { const ns = new Set(state.streamingConversationIds); ns.delete(stream.conversationId); return ns; })(),
       }));
 
       activeStreams.delete(payload.requestId);
@@ -262,6 +262,7 @@ interface ConnectionState {
   setConnections: (connections: Connection[]) => void;
   addConnection: (conn: Connection) => void;
   removeConnection: (id: string) => void;
+  updateConnection: (id: string, updates: Partial<Connection>) => void;
   testConnection: (host: string, port: number, useHttps: boolean) => Promise<boolean>;
   checkStatus: () => Promise<boolean>;
 }
@@ -291,6 +292,13 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   removeConnection: (id) =>
     set((state) => ({
       connections: state.connections.filter((c) => c.id !== id),
+    })),
+
+  updateConnection: (id, updates) =>
+    set((state) => ({
+      connections: state.connections.map((c) =>
+        c.id === id ? { ...c, ...updates } : c
+      ),
     })),
 
   testConnection: async (host, port, useHttps) => {
@@ -375,8 +383,9 @@ export const useModelStore = create<ModelState>((set) => ({
 interface ChatState {
   conversations: Conversation[];
   activeConversationId: string | null;
-  isSending: boolean;
-  isStreaming: boolean;
+  sendingConversationIds: Set<string>;
+  streamingConversationIds: Set<string>;
+  isConversationSending: (id: string) => boolean;
   createConversation: (modelName: string, projectId?: string) => string;
   setActiveConversation: (id: string | null) => void;
   deleteConversation: (id: string) => void;
@@ -392,12 +401,25 @@ interface ChatState {
 export const useChatStore = create<ChatState>((set, get) => ({
   conversations: [],
   activeConversationId: null,
-  isSending: false,
-  isStreaming: false,
+  sendingConversationIds: new Set<string>(),
+  streamingConversationIds: new Set<string>(),
+
+  isConversationSending: (id) => {
+    return get().sendingConversationIds.has(id);
+  },
 
   createConversation: (modelName, projectId) => {
     const id = uuidv4();
     const now = new Date().toISOString();
+    const projectStore = useProjectStore.getState();
+    const project = projectId ? projectStore.projects.find(p => p.id === projectId) : undefined;
+    // Combine project system prompt and instructions
+    let systemPrompt = project?.systemPrompt;
+    if (project?.instructions) {
+      systemPrompt = systemPrompt
+        ? `${systemPrompt}\n\n## Instructions\n${project.instructions}`
+        : project.instructions;
+    }
     const conversation: Conversation = {
       id,
       title: 'New Conversation',
@@ -406,6 +428,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       createdAt: now,
       updatedAt: now,
       parameters: { temperature: 0.7, topK: 40, topP: 0.9 },
+      systemPrompt,
       projectId,
       toolCallingEnabled: false,
     };
@@ -425,7 +448,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         state.activeConversationId === id ? null : state.activeConversationId,
     })),
 
-  sendMessage: async (content, _attachments) => {
+  sendMessage: async (content, attachments) => {
     initStreamingListener();
 
     const state = get();
@@ -437,13 +460,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const requestId = uuidv4();
     const assistantMessageId = uuidv4();
 
+    // Convert File objects to Attachment format for image attachments
+    const messageAttachments: import('../types').Attachment[] = [];
+    if (attachments && attachments.length > 0) {
+      for (const file of attachments) {
+        const arrayBuffer = await file.arrayBuffer();
+        const data = Array.from(new Uint8Array(arrayBuffer));
+        messageAttachments.push({
+          id: uuidv4(),
+          name: file.name,
+          mimeType: file.type,
+          data,
+          size: file.size,
+        });
+      }
+    }
+
     const userMessage: Message = {
       id: uuidv4(),
       role: 'user',
       content,
       timestamp: new Date().toISOString(),
       isError: false,
-      attachments: [],
+      attachments: messageAttachments,
       toolCalls: [],
       status: 'sent',
     };
@@ -471,8 +510,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
           : c
       ),
-      isSending: true,
-      isStreaming: true,
+      sendingConversationIds: new Set([...s.sendingConversationIds, conv.id]),
+      streamingConversationIds: new Set([...s.streamingConversationIds, conv.id]),
     }));
 
     activeStreams.set(requestId, {
@@ -491,7 +530,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         model_name: m.modelName ?? null,
         is_error: m.isError,
         token_count: m.tokenCount ?? null,
-        attachments: [],
+        attachments: m.attachments.map((a) => ({
+          id: a.id,
+          name: a.name,
+          mime_type: a.mimeType,
+          data: a.data,
+          size: a.size,
+        })),
         tool_calls: [],
         status: m.status,
         status_message: m.statusMessage ?? null,
@@ -532,8 +577,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 }
               : c
           ),
-          isSending: false,
-          isStreaming: false,
+          sendingConversationIds: (() => { const ns = new Set(s.sendingConversationIds); ns.delete(conv.id); return ns; })(),
+          streamingConversationIds: (() => { const ns = new Set(s.streamingConversationIds); ns.delete(conv.id); return ns; })(),
         }));
       }
 
@@ -580,8 +625,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
               }
             : c
         ),
-        isSending: false,
-        isStreaming: false,
+        sendingConversationIds: (() => { const ns = new Set(s.sendingConversationIds); ns.delete(conv.id); return ns; })(),
+        streamingConversationIds: (() => { const ns = new Set(s.streamingConversationIds); ns.delete(conv.id); return ns; })(),
       }));
 
       activeStreams.delete(requestId);
@@ -634,7 +679,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 interface ProjectState {
   projects: Project[];
   activeProjectId: string | null;
-  createProject: (name: string, description?: string) => string;
+  createProject: (name: string, description?: string, systemPrompt?: string, instructions?: string) => string;
   updateProject: (id: string, updates: Partial<Project>) => void;
   deleteProject: (id: string) => void;
   setActiveProject: (id: string | null) => void;
@@ -644,13 +689,15 @@ export const useProjectStore = create<ProjectState>((set) => ({
   projects: [],
   activeProjectId: null,
 
-  createProject: (name, description) => {
+  createProject: (name, description, systemPrompt, instructions) => {
     const id = uuidv4();
     const now = new Date().toISOString();
     const project: Project = {
       id,
       name,
       description,
+      systemPrompt,
+      instructions,
       color: '#6366f1',
       icon: 'folder',
       createdAt: now,

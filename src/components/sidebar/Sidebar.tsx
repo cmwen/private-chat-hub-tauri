@@ -4,6 +4,8 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronRight as ChevronRightIcon,
   Settings,
   FolderKanban,
   GitCompare,
@@ -12,7 +14,7 @@ import {
   Wifi,
   WifiOff,
 } from 'lucide-react';
-import { useChatStore, useModelStore, useConnectionStore, useUIStore } from '../../stores';
+import { useChatStore, useModelStore, useConnectionStore, useUIStore, useProjectStore } from '../../stores';
 import { formatTimestamp, truncate } from '../../utils/format';
 import type { View } from '../../types';
 
@@ -21,8 +23,10 @@ export function Sidebar() {
   const { conversations, activeConversationId, setActiveConversation, createConversation, deleteConversation } = useChatStore();
   const { selectedModel, models } = useModelStore();
   const { isConnected } = useConnectionStore();
+  const { projects, activeProjectId } = useProjectStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [hoveredConv, setHoveredConv] = useState<string | null>(null);
+  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set());
 
   const filteredConversations = searchQuery
     ? conversations.filter(
@@ -31,6 +35,22 @@ export function Sidebar() {
           c.messages.some((m) => m.content.toLowerCase().includes(searchQuery.toLowerCase()))
       )
     : conversations;
+
+  const projectConversations = new Map<string | null, typeof filteredConversations>();
+  for (const conv of filteredConversations) {
+    const key = conv.projectId || null;
+    if (!projectConversations.has(key)) projectConversations.set(key, []);
+    projectConversations.get(key)!.push(conv);
+  }
+
+  const toggleProjectCollapse = (projectId: string) => {
+    setCollapsedProjects(prev => {
+      const next = new Set(prev);
+      if (next.has(projectId)) next.delete(projectId);
+      else next.add(projectId);
+      return next;
+    });
+  };
 
   if (!sidebarOpen) {
     return (
@@ -62,7 +82,7 @@ export function Sidebar() {
         className="btn btn-primary btn-new-chat"
         onClick={() => {
           const model = selectedModel || models[0]?.name || 'llama3';
-          createConversation(model);
+          createConversation(model, activeProjectId || undefined);
           setView('chat');
         }}
         disabled={!isConnected || models.length === 0}
@@ -84,43 +104,109 @@ export function Sidebar() {
 
       {/* Conversation List */}
       <div className="conversation-list">
-        {filteredConversations.map((conv) => (
-          <div
-            key={conv.id}
-            className={`conversation-item ${conv.id === activeConversationId ? 'active' : ''}`}
-            onClick={() => {
-              setActiveConversation(conv.id);
-              setView('chat');
-            }}
-            onMouseEnter={() => setHoveredConv(conv.id)}
-            onMouseLeave={() => setHoveredConv(null)}
-          >
-            <div className="conversation-item-content">
-              <div className="conversation-item-title">{truncate(conv.title, 30)}</div>
-              <div className="conversation-item-meta">
-                <span className="conversation-item-model">{conv.modelName}</span>
-                <span className="conversation-item-time">{formatTimestamp(conv.updatedAt)}</span>
-              </div>
-              {conv.messages.length > 0 && (
-                <div className="conversation-item-preview">
-                  {truncate(conv.messages[conv.messages.length - 1].content, 60)}
+        {/* Project-grouped conversations */}
+        {projects
+          .filter((p) => projectConversations.has(p.id))
+          .map((project) => {
+            const convs = projectConversations.get(project.id)!;
+            const isCollapsed = collapsedProjects.has(project.id);
+            return (
+              <div key={project.id} className="sidebar-project-group">
+                <div
+                  className={`sidebar-project-header ${activeProjectId === project.id ? 'active' : ''}`}
+                  onClick={() => toggleProjectCollapse(project.id)}
+                >
+                  {isCollapsed ? <ChevronRightIcon size={12} /> : <ChevronDown size={12} />}
+                  <span className="sidebar-project-dot" style={{ background: project.color }} />
+                  <span>{project.name}</span>
+                  <span className="sidebar-project-count">{convs.length}</span>
                 </div>
-              )}
-            </div>
-            {hoveredConv === conv.id && (
-              <button
-                className="btn btn-icon btn-xs btn-danger conversation-delete"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deleteConversation(conv.id);
+                {!isCollapsed &&
+                  convs.map((conv) => (
+                    <div
+                      key={conv.id}
+                      className={`conversation-item ${conv.id === activeConversationId ? 'active' : ''}`}
+                      onClick={() => {
+                        setActiveConversation(conv.id);
+                        setView('chat');
+                      }}
+                      onMouseEnter={() => setHoveredConv(conv.id)}
+                      onMouseLeave={() => setHoveredConv(null)}
+                    >
+                      <div className="conversation-item-content">
+                        <div className="conversation-item-title">{truncate(conv.title, 30)}</div>
+                        <div className="conversation-item-meta">
+                          <span className="conversation-item-model">{conv.modelName}</span>
+                          <span className="conversation-item-time">{formatTimestamp(conv.updatedAt)}</span>
+                        </div>
+                        {conv.messages.length > 0 && (
+                          <div className="conversation-item-preview">
+                            {truncate(conv.messages[conv.messages.length - 1].content, 60)}
+                          </div>
+                        )}
+                      </div>
+                      {hoveredConv === conv.id && (
+                        <button
+                          className="btn btn-icon btn-xs btn-danger conversation-delete"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteConversation(conv.id);
+                          }}
+                          title="Delete"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+              </div>
+            );
+          })}
+
+        {/* Ungrouped conversations */}
+        {projectConversations.has(null) && (
+          <div className="sidebar-project-group">
+            <div className="sidebar-section-label">General</div>
+            {projectConversations.get(null)!.map((conv) => (
+              <div
+                key={conv.id}
+                className={`conversation-item ${conv.id === activeConversationId ? 'active' : ''}`}
+                onClick={() => {
+                  setActiveConversation(conv.id);
+                  setView('chat');
                 }}
-                title="Delete"
+                onMouseEnter={() => setHoveredConv(conv.id)}
+                onMouseLeave={() => setHoveredConv(null)}
               >
-                <Trash2 size={14} />
-              </button>
-            )}
+                <div className="conversation-item-content">
+                  <div className="conversation-item-title">{truncate(conv.title, 30)}</div>
+                  <div className="conversation-item-meta">
+                    <span className="conversation-item-model">{conv.modelName}</span>
+                    <span className="conversation-item-time">{formatTimestamp(conv.updatedAt)}</span>
+                  </div>
+                  {conv.messages.length > 0 && (
+                    <div className="conversation-item-preview">
+                      {truncate(conv.messages[conv.messages.length - 1].content, 60)}
+                    </div>
+                  )}
+                </div>
+                {hoveredConv === conv.id && (
+                  <button
+                    className="btn btn-icon btn-xs btn-danger conversation-delete"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteConversation(conv.id);
+                    }}
+                    title="Delete"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
-        ))}
+        )}
+
         {filteredConversations.length === 0 && (
           <div className="sidebar-empty">
             {searchQuery ? 'No matching conversations' : 'No conversations yet'}

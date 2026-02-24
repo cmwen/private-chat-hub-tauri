@@ -27,7 +27,7 @@ export function SettingsView() {
 }
 
 function ConnectionSettings() {
-  const { connections, isConnected, isConnecting, connectionError, testConnection } =
+  const { connections, isConnected, isConnecting, connectionError, testConnection, updateConnection } =
     useConnectionStore();
 
   const defaultConn = connections[0] || { host: 'localhost', port: 11434, useHttps: false };
@@ -40,6 +40,12 @@ function ConnectionSettings() {
     setTestResult(null);
     const ok = await testConnection(host, port, useHttps);
     setTestResult(ok ? 'success' : 'error');
+    if (ok) {
+      const conn = connections[0];
+      if (conn) {
+        updateConnection(conn.id, { host, port, useHttps, lastConnectedAt: new Date().toISOString() });
+      }
+    }
   };
 
   return (

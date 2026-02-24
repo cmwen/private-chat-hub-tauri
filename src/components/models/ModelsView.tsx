@@ -8,9 +8,15 @@ import {
   HardDrive,
   CheckCircle,
   XCircle,
+  Eye,
+  Wrench,
+  Code,
+  Info,
+  X,
 } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 import { useModelStore, useConnectionStore } from '../../stores';
-import { formatFileSize, getModelFamily } from '../../utils/format';
+import { formatFileSize, getModelFamily, getModelCapabilities } from '../../utils/format';
 import type { OllamaModel } from '../../types';
 
 export function ModelsView() {
@@ -132,6 +138,111 @@ export function ModelsView() {
   );
 }
 
+function ModelDetailModal({ model, onClose }: { model: OllamaModel; onClose: () => void }) {
+  const [details, setDetails] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    invoke<any>('show_model', { modelName: model.name })
+      .then(setDetails)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [model.name]);
+
+  const capabilities = getModelCapabilities(model.name);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3>{model.name}</h3>
+          <button className="btn-icon" onClick={onClose}><X size={18} /></button>
+        </div>
+
+        {capabilities.length > 0 && (
+          <div className="capability-badges" style={{ marginBottom: 16 }}>
+            {capabilities.map((cap) => (
+              <span key={cap} className={`capability-badge ${cap}`}>
+                {cap === 'vision' && <Eye size={12} />}
+                {cap === 'tools' && <Wrench size={12} />}
+                {cap === 'code' && <Code size={12} />}
+                {cap.charAt(0).toUpperCase() + cap.slice(1)}
+              </span>
+            ))}
+          </div>
+        )}
+
+        <div className="model-detail-section">
+          <h4>Details</h4>
+          <div className="model-detail-grid">
+            {model.details?.parameter_size && (
+              <div className="model-detail-item">
+                <span className="label">Parameters</span>
+                <span className="value">{model.details.parameter_size}</span>
+              </div>
+            )}
+            {model.details?.quantization_level && (
+              <div className="model-detail-item">
+                <span className="label">Quantization</span>
+                <span className="value">{model.details.quantization_level}</span>
+              </div>
+            )}
+            {model.details?.format && (
+              <div className="model-detail-item">
+                <span className="label">Format</span>
+                <span className="value">{model.details.format}</span>
+              </div>
+            )}
+            {model.details?.family && (
+              <div className="model-detail-item">
+                <span className="label">Family</span>
+                <span className="value">{model.details.family}</span>
+              </div>
+            )}
+            {model.size && (
+              <div className="model-detail-item">
+                <span className="label">Disk Size</span>
+                <span className="value">{formatFileSize(model.size)}</span>
+              </div>
+            )}
+            {model.details?.families && model.details.families.length > 0 && (
+              <div className="model-detail-item">
+                <span className="label">Families</span>
+                <span className="value">{model.details.families.join(', ')}</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {loading && (
+          <div className="loading-state"><Loader2 size={18} className="spin" /><span>Loading details...</span></div>
+        )}
+
+        {details?.template && (
+          <div className="model-detail-section">
+            <h4>Template</h4>
+            <pre>{details.template}</pre>
+          </div>
+        )}
+
+        {details?.system && (
+          <div className="model-detail-section">
+            <h4>System Prompt</h4>
+            <pre>{details.system}</pre>
+          </div>
+        )}
+
+        {details?.license && (
+          <div className="model-detail-section">
+            <h4>License</h4>
+            <pre>{details.license}</pre>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ModelCard({
   model,
   onSelect,
@@ -144,45 +255,71 @@ function ModelCard({
   isDeleting: boolean;
 }) {
   const { selectedModel } = useModelStore();
+  const [showDetail, setShowDetail] = useState(false);
   const isSelected = selectedModel === model.name;
   const family = getModelFamily(model.name);
+  const capabilities = getModelCapabilities(model.name);
 
   return (
-    <div className={`model-card ${isSelected ? 'selected' : ''}`} onClick={onSelect}>
-      <div className="model-card-header">
-        <h4>{model.name}</h4>
-        {isSelected && <CheckCircle size={16} className="text-primary" />}
-      </div>
-      <div className="model-card-details">
-        <span className="model-badge">{family}</span>
-        {model.details?.parameter_size && (
-          <span className="model-badge">{model.details.parameter_size}</span>
-        )}
-        {model.details?.quantization_level && (
-          <span className="model-badge">{model.details.quantization_level}</span>
-        )}
-      </div>
-      {model.size && (
-        <div className="model-card-size">
-          <HardDrive size={14} />
-          <span>{formatFileSize(model.size)}</span>
+    <>
+      <div className={`model-card ${isSelected ? 'selected' : ''}`} onClick={onSelect}>
+        <div className="model-card-header">
+          <h4>{model.name}</h4>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {isSelected && <CheckCircle size={16} className="text-primary" />}
+            <button
+              className="btn-icon"
+              onClick={(e) => { e.stopPropagation(); setShowDetail(true); }}
+              title="View details"
+            >
+              <Info size={16} />
+            </button>
+          </div>
         </div>
-      )}
-      <div className="model-card-actions">
-        <button
-          className="btn btn-sm btn-primary"
-          onClick={(e) => { e.stopPropagation(); onSelect(); }}
-        >
-          Select
-        </button>
-        <button
-          className="btn btn-sm btn-danger"
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          disabled={isDeleting}
-        >
-          {isDeleting ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
-        </button>
+        <div className="model-card-details">
+          <span className="model-badge">{family}</span>
+          {model.details?.parameter_size && (
+            <span className="model-badge">{model.details.parameter_size}</span>
+          )}
+          {model.details?.quantization_level && (
+            <span className="model-badge">{model.details.quantization_level}</span>
+          )}
+        </div>
+        {capabilities.length > 0 && (
+          <div className="capability-badges">
+            {capabilities.map((cap) => (
+              <span key={cap} className={`capability-badge ${cap}`}>
+                {cap === 'vision' && <Eye size={10} />}
+                {cap === 'tools' && <Wrench size={10} />}
+                {cap === 'code' && <Code size={10} />}
+                {cap.charAt(0).toUpperCase() + cap.slice(1)}
+              </span>
+            ))}
+          </div>
+        )}
+        {model.size && (
+          <div className="model-card-size">
+            <HardDrive size={14} />
+            <span>{formatFileSize(model.size)}</span>
+          </div>
+        )}
+        <div className="model-card-actions">
+          <button
+            className="btn btn-sm btn-primary"
+            onClick={(e) => { e.stopPropagation(); onSelect(); }}
+          >
+            Select
+          </button>
+          <button
+            className="btn btn-sm btn-danger"
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            disabled={isDeleting}
+          >
+            {isDeleting ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
+          </button>
+        </div>
       </div>
-    </div>
+      {showDetail && <ModelDetailModal model={model} onClose={() => setShowDetail(false)} />}
+    </>
   );
 }

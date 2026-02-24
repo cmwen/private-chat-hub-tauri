@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 import { useModelStore, useConnectionStore } from '../../stores';
 import { formatDuration } from '../../utils/format';
 import { invoke } from '@tauri-apps/api/core';
@@ -135,7 +137,7 @@ export function ComparisonView() {
               </span>
             </div>
             <div className="comparison-content">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
                 {result.model1.content}
               </ReactMarkdown>
             </div>
@@ -150,7 +152,7 @@ export function ComparisonView() {
               </span>
             </div>
             <div className="comparison-content">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
                 {result.model2.content}
               </ReactMarkdown>
             </div>

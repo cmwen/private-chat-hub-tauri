@@ -37,16 +37,11 @@
     ]
   },
   "plugins": {
-    "store": {},
-    "fs": {
-      "scope": {
-        "allow": ["$APPDATA/**", "$DOWNLOAD/**", "$HOME/**"],
-        "deny": []
-      }
-    },
-    "dialog": {},
-    "clipboard-manager": {},
-    "notification": {},
+    "store": null,
+    "fs": null,
+    "dialog": null,
+    "clipboard-manager": null,
+    "notification": null,
     "shell": {
       "open": true
     }

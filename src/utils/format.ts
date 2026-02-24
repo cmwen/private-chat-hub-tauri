@@ -62,3 +62,40 @@ export function supportsVision(modelName: string): boolean {
     (lower.includes('gemma') && lower.includes('3'))
   );
 }
+
+export function supportsTools(modelName: string): boolean {
+  const lower = modelName.toLowerCase();
+  return (
+    lower.includes('llama3') ||
+    lower.includes('llama-3') ||
+    lower.includes('mistral') ||
+    lower.includes('mixtral') ||
+    lower.includes('command-r') ||
+    lower.includes('qwen2') ||
+    lower.includes('qwen3') ||
+    lower.includes('firefunction') ||
+    lower.includes('hermes') ||
+    lower.includes('nexus')
+  );
+}
+
+export function supportsCode(modelName: string): boolean {
+  const lower = modelName.toLowerCase();
+  return (
+    lower.includes('codellama') ||
+    lower.includes('codegemma') ||
+    lower.includes('codestral') ||
+    lower.includes('deepseek-coder') ||
+    lower.includes('starcoder') ||
+    lower.includes('qwen2.5-coder') ||
+    /\bcode\b/.test(lower)
+  );
+}
+
+export function getModelCapabilities(modelName: string): string[] {
+  const caps: string[] = [];
+  if (supportsVision(modelName)) caps.push('vision');
+  if (supportsTools(modelName)) caps.push('tools');
+  if (supportsCode(modelName)) caps.push('code');
+  return caps;
+}

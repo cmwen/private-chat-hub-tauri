@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 import {
   Send,
   Loader2,
@@ -10,9 +12,11 @@ import {
   Bot,
   User,
   Settings2,
+  Image,
+  Wrench,
 } from 'lucide-react';
 import { useChatStore, useModelStore, useConnectionStore } from '../../stores';
-import { formatTime } from '../../utils/format';
+import { formatTime, supportsVision, supportsTools } from '../../utils/format';
 import type { Message, ModelParameters } from '../../types';
 import { PARAMETER_PRESETS } from '../../types';
 import TextareaAutosize from 'react-textarea-autosize';
@@ -21,15 +25,19 @@ export function ChatView() {
   const {
     activeConversationId,
     conversations,
-    isSending,
+    sendingConversationIds,
     sendMessage,
     updateConversationModel,
     deleteConversation,
+    toggleToolCalling,
   } = useChatStore();
 
   const { models } = useModelStore();
   const { isConnected } = useConnectionStore();
   const activeConv = conversations.find((c) => c.id === activeConversationId);
+  const isSending = activeConv ? sendingConversationIds.has(activeConv.id) : false;
+  const modelSupportsVision = activeConv ? supportsVision(activeConv.modelName) : false;
+  const modelSupportsTools = activeConv ? supportsTools(activeConv.modelName) : false;
 
   if (!activeConv) {
     return <EmptyState />;
@@ -48,6 +56,10 @@ export function ChatView() {
         onSend={sendMessage}
         isDisabled={isSending || !isConnected}
         isSending={isSending}
+        supportsVision={modelSupportsVision}
+        supportsTools={modelSupportsTools}
+        toolCallingEnabled={activeConv.toolCallingEnabled}
+        onToggleToolCalling={() => toggleToolCalling(activeConv.id)}
       />
     </div>
   );
@@ -283,7 +295,8 @@ function MessageBubble({ message }: { message: Message }) {
             <p>{message.content}</p>
           ) : (
             <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
+              remarkPlugins={[remarkGfm, remarkMath]}
+              rehypePlugins={[rehypeKatex]}
               components={{
                 code({ className, children, ...props }: any) {
                   const isInline = !className;
@@ -340,19 +353,41 @@ function ChatInput({
   onSend,
   isDisabled,
   isSending,
+  supportsVision,
+  supportsTools,
+  toolCallingEnabled,
+  onToggleToolCalling,
 }: {
-  onSend: (content: string) => Promise<void>;
+  onSend: (content: string, attachments?: File[]) => Promise<void>;
   isDisabled: boolean;
   isSending: boolean;
+  supportsVision?: boolean;
+  supportsTools?: boolean;
+  toolCallingEnabled?: boolean;
+  onToggleToolCalling?: () => void;
 }) {
   const [input, setInput] = useState('');
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      setAttachments(prev => [...prev, ...Array.from(e.target.files!)]);
+    }
+  };
+
+  const removeAttachment = (index: number) => {
+    setAttachments(prev => prev.filter((_, i) => i !== index));
+  };
 
   const handleSend = useCallback(async () => {
     const trimmed = input.trim();
     if (!trimmed || isDisabled) return;
     setInput('');
-    await onSend(trimmed);
-  }, [input, isDisabled, onSend]);
+    const files = [...attachments];
+    setAttachments([]);
+    await onSend(trimmed, files.length > 0 ? files : undefined);
+  }, [input, isDisabled, onSend, attachments]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -367,23 +402,67 @@ function ChatInput({
   return (
     <div className="chat-input-container">
       <div className="chat-input-wrapper">
-        <TextareaAutosize
-          className="chat-input"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={isDisabled ? 'Connect to Ollama to start chatting...' : 'Type a message... (Enter to send, Shift+Enter for new line)'}
-          disabled={isDisabled}
-          minRows={1}
-          maxRows={8}
-        />
-        <button
-          className="btn btn-primary btn-send"
-          onClick={handleSend}
-          disabled={isDisabled || !input.trim()}
-        >
-          {isSending ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
-        </button>
+        {attachments.length > 0 && (
+          <div className="attachment-previews">
+            {attachments.map((file, i) => (
+              <div key={i} className="attachment-preview">
+                <span>{file.name}</span>
+                <button className="btn btn-icon btn-xs" onClick={() => removeAttachment(i)}>&times;</button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="chat-input-row">
+          <div className="chat-input-actions">
+            {supportsVision && (
+              <>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileSelect}
+                  accept="image/*"
+                  multiple
+                  style={{ display: 'none' }}
+                />
+                <button
+                  className="btn btn-icon btn-xs"
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Attach image"
+                  disabled={isDisabled}
+                >
+                  <Image size={16} />
+                </button>
+              </>
+            )}
+            {supportsTools && (
+              <button
+                className={`btn btn-icon btn-xs ${toolCallingEnabled ? 'active' : ''}`}
+                onClick={onToggleToolCalling}
+                title={toolCallingEnabled ? 'Tool calling enabled' : 'Tool calling disabled'}
+                disabled={isDisabled}
+              >
+                <Wrench size={16} />
+              </button>
+            )}
+          </div>
+          <TextareaAutosize
+            className="chat-input"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={isDisabled ? 'Connect to Ollama to start chatting...' : 'Type a message... (Enter to send, Shift+Enter for new line)'}
+            disabled={isDisabled}
+            minRows={1}
+            maxRows={8}
+          />
+          <button
+            className="btn btn-primary btn-send"
+            onClick={handleSend}
+            disabled={isDisabled || !input.trim()}
+          >
+            {isSending ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
+          </button>
+        </div>
       </div>
     </div>
   );
