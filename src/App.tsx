@@ -1,18 +1,23 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { ChatView } from './components/chat/ChatView';
 import { SettingsView } from './components/settings/SettingsView';
 import { ProjectsView } from './components/projects/ProjectsView';
 import { ComparisonView } from './components/comparison/ComparisonView';
 import { ModelsView } from './components/models/ModelsView';
-import { useUIStore, useConnectionStore, useModelStore, useSettingsStore } from './stores';
+import { useUIStore, useConnectionStore, useModelStore, useSettingsStore, hydratePersistedState } from './stores';
 import './App.css';
 
 function App() {
+  const [isHydrated, setIsHydrated] = useState(false);
   const { currentView, sidebarOpen } = useUIStore();
   const { connections, testConnection, checkStatus } = useConnectionStore();
   const { fetchModels } = useModelStore();
   const { settings } = useSettingsStore();
+
+  useEffect(() => {
+    void hydratePersistedState().finally(() => setIsHydrated(true));
+  }, []);
 
   // Apply theme
   useEffect(() => {
@@ -27,13 +32,15 @@ function App() {
 
   // Auto-connect on startup
   useEffect(() => {
+    if (!isHydrated) return;
+
     const defaultConn = connections.find((c) => c.isDefault) || connections[0];
     if (defaultConn) {
       testConnection(defaultConn.host, defaultConn.port, defaultConn.useHttps).then((ok) => {
         if (ok) fetchModels();
       });
     }
-  }, []);
+  }, [isHydrated, connections, testConnection, fetchModels]);
 
   // Periodic health check
   useEffect(() => {

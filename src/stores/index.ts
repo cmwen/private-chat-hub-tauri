@@ -11,6 +11,246 @@ import type {
   View,
 } from '../types';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { LazyStore } from '@tauri-apps/plugin-store';
+
+type PersistedState = {
+  version: number;
+  connection: {
+    connections: Connection[];
+    activeConnectionId: string | null;
+  };
+  model: {
+    selectedModel: string | null;
+  };
+  chat: {
+    conversations: Conversation[];
+    activeConversationId: string | null;
+  };
+  project: {
+    projects: Project[];
+    activeProjectId: string | null;
+  };
+  settings: {
+    settings: AppSettings;
+  };
+  ui: {
+    currentView: View;
+    sidebarOpen: boolean;
+    sidebarWidth: number;
+  };
+};
+
+type ChatStreamChunkEvent = {
+  requestId: string;
+  content: string;
+  done: boolean;
+  evalCount?: number;
+  totalDuration?: number;
+  error?: string;
+};
+
+const appStore = new LazyStore('app-state.json');
+const CURRENT_PERSISTENCE_VERSION = 1;
+
+let hasHydrated = false;
+let subscriptionsInitialized = false;
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+let streamListenerInitialized = false;
+
+const activeStreams = new Map<string, { conversationId: string; assistantMessageId: string; modelName: string }>();
+const streamsWithChunks = new Set<string>();
+
+const schedulePersist = () => {
+  if (!hasHydrated) return;
+
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+  }
+
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    void persistState();
+  }, 200);
+};
+
+const persistState = async () => {
+  try {
+    const connectionState = useConnectionStore.getState();
+    const modelState = useModelStore.getState();
+    const chatState = useChatStore.getState();
+    const projectState = useProjectStore.getState();
+    const settingsState = useSettingsStore.getState();
+    const uiState = useUIStore.getState();
+
+    const payload: PersistedState = {
+      version: CURRENT_PERSISTENCE_VERSION,
+      connection: {
+        connections: connectionState.connections,
+        activeConnectionId: connectionState.activeConnection?.id ?? null,
+      },
+      model: {
+        selectedModel: modelState.selectedModel,
+      },
+      chat: {
+        conversations: chatState.conversations,
+        activeConversationId: chatState.activeConversationId,
+      },
+      project: {
+        projects: projectState.projects,
+        activeProjectId: projectState.activeProjectId,
+      },
+      settings: {
+        settings: settingsState.settings,
+      },
+      ui: {
+        currentView: uiState.currentView,
+        sidebarOpen: uiState.sidebarOpen,
+        sidebarWidth: uiState.sidebarWidth,
+      },
+    };
+
+    await appStore.set('state', payload);
+    await appStore.save();
+  } catch {
+    // Non-fatal persistence failure
+  }
+};
+
+const initPersistenceSubscriptions = () => {
+  if (subscriptionsInitialized) return;
+  subscriptionsInitialized = true;
+
+  useConnectionStore.subscribe(() => schedulePersist());
+  useModelStore.subscribe(() => schedulePersist());
+  useChatStore.subscribe(() => schedulePersist());
+  useProjectStore.subscribe(() => schedulePersist());
+  useSettingsStore.subscribe(() => schedulePersist());
+  useUIStore.subscribe(() => schedulePersist());
+};
+
+const initStreamingListener = () => {
+  if (streamListenerInitialized) return;
+  streamListenerInitialized = true;
+
+  void listen<ChatStreamChunkEvent>('chat_stream_chunk', (event) => {
+    const payload = event.payload;
+    const stream = activeStreams.get(payload.requestId);
+    if (!stream) return;
+
+    if (payload.content) {
+      streamsWithChunks.add(payload.requestId);
+      useChatStore.setState((state) => ({
+        conversations: state.conversations.map((conversation) => {
+          if (conversation.id !== stream.conversationId) return conversation;
+          return {
+            ...conversation,
+            updatedAt: new Date().toISOString(),
+            messages: conversation.messages.map((message) =>
+              message.id === stream.assistantMessageId
+                ? {
+                    ...message,
+                    content: `${message.content}${payload.content}`,
+                    status: 'sending',
+                  }
+                : message
+            ),
+          };
+        }),
+      }));
+    }
+
+    if (payload.done || payload.error) {
+      useChatStore.setState((state) => ({
+        conversations: state.conversations.map((conversation) => {
+          if (conversation.id !== stream.conversationId) return conversation;
+          return {
+            ...conversation,
+            updatedAt: new Date().toISOString(),
+            messages: conversation.messages.map((message) =>
+              message.id === stream.assistantMessageId
+                ? {
+                    ...message,
+                    modelName: stream.modelName,
+                    tokenCount: payload.evalCount,
+                    status: payload.error ? 'failed' : 'sent',
+                    isError: Boolean(payload.error),
+                    content: payload.error ? `Error: ${payload.error}` : message.content,
+                  }
+                : message
+            ),
+          };
+        }),
+        isSending: false,
+        isStreaming: false,
+      }));
+
+      activeStreams.delete(payload.requestId);
+      streamsWithChunks.delete(payload.requestId);
+    }
+  });
+};
+
+export async function hydratePersistedState(): Promise<void> {
+  initPersistenceSubscriptions();
+  initStreamingListener();
+
+  if (hasHydrated) return;
+
+  try {
+    const persisted = await appStore.get<PersistedState>('state');
+    if (!persisted || persisted.version !== CURRENT_PERSISTENCE_VERSION) {
+      hasHydrated = true;
+      return;
+    }
+
+    useConnectionStore.setState((state) => {
+      const connections = persisted.connection.connections?.length
+        ? persisted.connection.connections
+        : state.connections;
+      const activeConnection =
+        connections.find((connection: Connection) => connection.id === persisted.connection.activeConnectionId) ?? null;
+      return {
+        ...state,
+        connections,
+        activeConnection,
+      };
+    });
+
+    useModelStore.setState((state) => ({
+      ...state,
+      selectedModel: persisted.model.selectedModel,
+    }));
+
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: persisted.chat.conversations ?? [],
+      activeConversationId: persisted.chat.activeConversationId,
+    }));
+
+    useProjectStore.setState((state) => ({
+      ...state,
+      projects: persisted.project.projects ?? [],
+      activeProjectId: persisted.project.activeProjectId,
+    }));
+
+    useSettingsStore.setState((state) => ({
+      ...state,
+      settings: persisted.settings.settings,
+    }));
+
+    useUIStore.setState((state) => ({
+      ...state,
+      currentView: persisted.ui.currentView,
+      sidebarOpen: persisted.ui.sidebarOpen,
+      sidebarWidth: persisted.ui.sidebarWidth,
+    }));
+  } catch {
+    // Non-fatal hydration failure
+  } finally {
+    hasHydrated = true;
+  }
+}
 
 // ─── Connection Store ───
 interface ConnectionState {
@@ -186,11 +426,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     })),
 
   sendMessage: async (content, _attachments) => {
+    initStreamingListener();
+
     const state = get();
     const conv = state.conversations.find(
       (c) => c.id === state.activeConversationId
     );
     if (!conv) return;
+
+    const requestId = uuidv4();
+    const assistantMessageId = uuidv4();
 
     const userMessage: Message = {
       id: uuidv4(),
@@ -203,15 +448,38 @@ export const useChatStore = create<ChatState>((set, get) => ({
       status: 'sent',
     };
 
+    const assistantMessage: Message = {
+      id: assistantMessageId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date().toISOString(),
+      modelName: conv.modelName,
+      isError: false,
+      attachments: [],
+      toolCalls: [],
+      status: 'sending',
+    };
+
     // Add user message
     set((s) => ({
       conversations: s.conversations.map((c) =>
         c.id === conv.id
-          ? { ...c, messages: [...c.messages, userMessage], updatedAt: new Date().toISOString() }
+          ? {
+              ...c,
+              messages: [...c.messages, userMessage, assistantMessage],
+              updatedAt: new Date().toISOString(),
+            }
           : c
       ),
       isSending: true,
+      isStreaming: true,
     }));
+
+    activeStreams.set(requestId, {
+      conversationId: conv.id,
+      assistantMessageId,
+      modelName: conv.modelName,
+    });
 
     try {
       // Build messages for API
@@ -239,30 +507,38 @@ export const useChatStore = create<ChatState>((set, get) => ({
           top_p: conv.parameters.topP ?? null,
           max_tokens: conv.parameters.maxTokens ?? null,
         },
-        stream: false,
+        stream: true,
+        requestId,
       });
 
-      const assistantMessage: Message = {
-        id: uuidv4(),
-        role: 'assistant',
-        content: result.content,
-        timestamp: new Date().toISOString(),
-        modelName: conv.modelName,
-        isError: false,
-        tokenCount: result.eval_count,
-        attachments: [],
-        toolCalls: [],
-        status: 'sent',
-      };
+      const streamedAnyChunks = streamsWithChunks.has(requestId);
+      if (!streamedAnyChunks) {
+        set((s) => ({
+          conversations: s.conversations.map((c) =>
+            c.id === conv.id
+              ? {
+                  ...c,
+                  updatedAt: new Date().toISOString(),
+                  messages: c.messages.map((m) =>
+                    m.id === assistantMessageId
+                      ? {
+                          ...m,
+                          content: result.content,
+                          status: 'sent',
+                          tokenCount: result.eval_count,
+                        }
+                      : m
+                  ),
+                }
+              : c
+          ),
+          isSending: false,
+          isStreaming: false,
+        }));
+      }
 
-      set((s) => ({
-        conversations: s.conversations.map((c) =>
-          c.id === conv.id
-            ? { ...c, messages: [...c.messages, assistantMessage], updatedAt: new Date().toISOString() }
-            : c
-        ),
-        isSending: false,
-      }));
+      activeStreams.delete(requestId);
+      streamsWithChunks.delete(requestId);
 
       // Auto-generate title for first message
       if (conv.messages.length === 0) {
@@ -295,11 +571,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set((s) => ({
         conversations: s.conversations.map((c) =>
           c.id === conv.id
-            ? { ...c, messages: [...c.messages, errorMessage], updatedAt: new Date().toISOString() }
+            ? {
+                ...c,
+                updatedAt: new Date().toISOString(),
+                messages: c.messages.map((m) =>
+                  m.id === assistantMessageId ? errorMessage : m
+                ),
+              }
             : c
         ),
         isSending: false,
+        isStreaming: false,
       }));
+
+      activeStreams.delete(requestId);
+      streamsWithChunks.delete(requestId);
     }
   },
 

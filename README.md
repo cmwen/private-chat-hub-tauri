@@ -31,10 +31,14 @@ Desktop companion to the [Private Chat Hub](../private-chat-hub) mobile app, reb
 - [Rust](https://rustup.rs/) 1.70+
 - Tauri system dependencies (Linux):
   ```bash
-  sudo apt-get install -y libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev \
+  sudo apt-get update
+  sudo apt-get install -y pkg-config build-essential curl wget file libssl-dev \
+    libgtk-3-dev libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev \
     libsoup-3.0-dev libayatana-appindicator3-dev patchelf
   ```
 - [Ollama](https://ollama.ai/) running locally or on a remote server
+
+If `pnpm tauri build` fails with `pkg-config` or `glib-2.0` errors, install the packages above and retry.
 
 ## Getting Started
 
