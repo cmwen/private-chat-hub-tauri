@@ -14,6 +14,7 @@ import {
   Settings2,
   Image,
   Wrench,
+  Square,
 } from 'lucide-react';
 import { useChatStore, useModelStore, useConnectionStore } from '../../stores';
 import { formatTime, supportsVision, supportsTools } from '../../utils/format';
@@ -26,7 +27,9 @@ export function ChatView() {
     activeConversationId,
     conversations,
     sendingConversationIds,
+    streamingConversationIds,
     sendMessage,
+    stopResponse,
     updateConversationModel,
     deleteConversation,
     toggleToolCalling,
@@ -36,6 +39,7 @@ export function ChatView() {
   const { isConnected } = useConnectionStore();
   const activeConv = conversations.find((c) => c.id === activeConversationId);
   const isSending = activeConv ? sendingConversationIds.has(activeConv.id) : false;
+  const isStreaming = activeConv ? streamingConversationIds.has(activeConv.id) : false;
   const modelSupportsVision = activeConv ? supportsVision(activeConv.modelName) : false;
   const modelSupportsTools = activeConv ? supportsTools(activeConv.modelName) : false;
 
@@ -56,6 +60,8 @@ export function ChatView() {
         onSend={sendMessage}
         isDisabled={isSending || !isConnected}
         isSending={isSending}
+        isStreaming={isStreaming}
+        onStop={() => activeConv && stopResponse(activeConv.id)}
         supportsVision={modelSupportsVision}
         supportsTools={modelSupportsTools}
         toolCallingEnabled={activeConv.toolCallingEnabled}
@@ -353,6 +359,8 @@ function ChatInput({
   onSend,
   isDisabled,
   isSending,
+  isStreaming,
+  onStop,
   supportsVision,
   supportsTools,
   toolCallingEnabled,
@@ -361,6 +369,8 @@ function ChatInput({
   onSend: (content: string, attachments?: File[]) => Promise<void>;
   isDisabled: boolean;
   isSending: boolean;
+  isStreaming?: boolean;
+  onStop?: () => void;
   supportsVision?: boolean;
   supportsTools?: boolean;
   toolCallingEnabled?: boolean;
@@ -455,13 +465,23 @@ function ChatInput({
             minRows={1}
             maxRows={8}
           />
-          <button
-            className="btn btn-primary btn-send"
-            onClick={handleSend}
-            disabled={isDisabled || !input.trim()}
-          >
-            {isSending ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
-          </button>
+          {isStreaming ? (
+            <button
+              className="btn btn-danger btn-send"
+              onClick={onStop}
+              title="Stop generating"
+            >
+              <Square size={18} />
+            </button>
+          ) : (
+            <button
+              className="btn btn-primary btn-send"
+              onClick={handleSend}
+              disabled={isDisabled || !input.trim()}
+            >
+              {isSending ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
+            </button>
+          )}
         </div>
       </div>
     </div>

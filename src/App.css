@@ -208,11 +208,40 @@ body {
 
 /* New Chat Button */
 .btn-new-chat {
-  margin: 8px 12px;
   display: flex;
   align-items: center;
   gap: 8px;
   justify-content: center;
+}
+
+/* Sidebar actions row */
+.sidebar-actions-row {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+}
+
+.sidebar-actions-row .btn-new-chat {
+  flex: 1;
+  margin: 0;
+}
+
+.sidebar-actions-row .btn-new-project {
+  padding: 8px 10px;
+}
+
+/* New project inline form */
+.sidebar-new-project-form {
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.sidebar-new-project-actions {
+  display: flex;
+  gap: 4px;
 }
 
 /* Search */
@@ -336,6 +365,7 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.3px;
   transition: background 0.15s;
+  position: relative;
 }
 
 .sidebar-project-header:hover {
@@ -353,11 +383,82 @@ body {
   flex-shrink: 0;
 }
 
+.sidebar-project-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sidebar-project-count {
-  margin-left: auto;
   font-size: 11px;
   color: var(--text-tertiary);
   font-weight: 400;
+}
+
+.sidebar-project-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  margin-left: auto;
+}
+
+.sidebar-project-header:hover .sidebar-project-actions {
+  opacity: 1;
+}
+
+/* Project new chat button */
+.sidebar-project-new-chat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 12px 4px 24px;
+  padding: 4px 8px;
+  border: 1px dashed var(--border-secondary);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  width: calc(100% - 36px);
+}
+
+.sidebar-project-new-chat:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--accent-primary);
+}
+
+.sidebar-project-new-chat:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Project inline settings */
+.sidebar-project-settings {
+  padding: 6px 12px 6px 24px;
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.sidebar-project-settings .form-group {
+  margin-bottom: 6px;
+}
+
+.sidebar-project-settings label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 2px;
+  display: block;
+}
+
+.sidebar-project-settings textarea.input {
+  font-size: 12px;
+  padding: 4px 8px;
 }
 
 .sidebar-section-label {
@@ -796,6 +897,16 @@ body {
   align-items: center;
   justify-content: center;
   border-radius: 50%;
+}
+
+.btn-send.btn-danger {
+  background: var(--accent-danger);
+  color: var(--text-on-primary);
+  border-color: var(--accent-danger);
+}
+
+.btn-send.btn-danger:hover {
+  background: var(--accent-danger-hover);
 }
 
 /* Empty State */

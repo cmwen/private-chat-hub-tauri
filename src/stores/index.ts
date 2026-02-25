@@ -394,8 +394,11 @@ interface ChatState {
   updateConversationModel: (id: string, model: string) => void;
   updateConversationParams: (id: string, params: ModelParameters) => void;
   updateSystemPrompt: (id: string, prompt: string) => void;
+  stopResponse: (conversationId: string) => void;
   toggleToolCalling: (id: string) => void;
   getActiveConversation: () => Conversation | undefined;
+  exportConversations: () => Promise<void>;
+  importConversations: () => Promise<{ imported: number; skipped: number }>;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -662,6 +665,40 @@ export const useChatStore = create<ChatState>((set, get) => ({
       ),
     })),
 
+  stopResponse: (conversationId) => {
+    for (const [requestId, stream] of activeStreams.entries()) {
+      if (stream.conversationId === conversationId) {
+        activeStreams.delete(requestId);
+        streamsWithChunks.delete(requestId);
+        break;
+      }
+    }
+
+    set((s) => {
+      const newSending = new Set(s.sendingConversationIds);
+      newSending.delete(conversationId);
+      const newStreaming = new Set(s.streamingConversationIds);
+      newStreaming.delete(conversationId);
+
+      return {
+        conversations: s.conversations.map((c) => {
+          if (c.id !== conversationId) return c;
+          return {
+            ...c,
+            updatedAt: new Date().toISOString(),
+            messages: c.messages.map((m) =>
+              m.status === 'sending'
+                ? { ...m, status: 'sent' as const }
+                : m
+            ),
+          };
+        }),
+        sendingConversationIds: newSending,
+        streamingConversationIds: newStreaming,
+      };
+    });
+  },
+
   toggleToolCalling: (id) =>
     set((s) => ({
       conversations: s.conversations.map((c) =>
@@ -672,6 +709,61 @@ export const useChatStore = create<ChatState>((set, get) => ({
   getActiveConversation: () => {
     const state = get();
     return state.conversations.find((c) => c.id === state.activeConversationId);
+  },
+
+  exportConversations: async () => {
+    const { save } = await import('@tauri-apps/plugin-dialog');
+    const { writeTextFile } = await import('@tauri-apps/plugin-fs');
+
+    const state = get();
+    const exportData = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      conversations: state.conversations,
+    };
+
+    const filePath = await save({
+      defaultPath: `chat-history-${new Date().toISOString().slice(0, 10)}.json`,
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    });
+
+    if (filePath) {
+      await writeTextFile(filePath, JSON.stringify(exportData, null, 2));
+    }
+  },
+
+  importConversations: async () => {
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    const { readTextFile } = await import('@tauri-apps/plugin-fs');
+
+    const filePath = await open({
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+      multiple: false,
+    });
+
+    if (filePath && typeof filePath === 'string') {
+      const content = await readTextFile(filePath);
+      const importData = JSON.parse(content);
+
+      if (!importData.conversations || !Array.isArray(importData.conversations)) {
+        throw new Error('Invalid chat history file');
+      }
+
+      const existingIds = new Set(get().conversations.map(c => c.id));
+      const newConversations = importData.conversations.filter(
+        (c: any) => c && c.id && c.title && c.messages && !existingIds.has(c.id)
+      );
+      
+      if (newConversations.length > 0) {
+        set((s) => ({
+          conversations: [...newConversations, ...s.conversations],
+        }));
+      }
+      
+      const skipped = importData.conversations.length - newConversations.length;
+      return { imported: newConversations.length, skipped };
+    }
+    return { imported: 0, skipped: 0 };
   },
 }));
 
@@ -715,11 +807,18 @@ export const useProjectStore = create<ProjectState>((set) => ({
       ),
     })),
 
-  deleteProject: (id) =>
+  deleteProject: (id) => {
+    // Also unlink conversations from this project
+    useChatStore.setState((s) => ({
+      conversations: s.conversations.map((c) =>
+        c.projectId === id ? { ...c, projectId: undefined } : c
+      ),
+    }));
     set((state) => ({
       projects: state.projects.filter((p) => p.id !== id),
       activeProjectId: state.activeProjectId === id ? null : state.activeProjectId,
-    })),
+    }));
+  },
 
   setActiveProject: (id) => set({ activeProjectId: id }),
 }));

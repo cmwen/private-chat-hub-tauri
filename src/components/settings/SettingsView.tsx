@@ -10,8 +10,11 @@ import {
   XCircle,
   Wrench,
   Info,
+  Database,
+  Download,
+  Upload,
 } from 'lucide-react';
-import { useSettingsStore, useConnectionStore } from '../../stores';
+import { useSettingsStore, useConnectionStore, useChatStore } from '../../stores';
 import type { AppSettings } from '../../types';
 
 export function SettingsView() {
@@ -21,6 +24,7 @@ export function SettingsView() {
       <ConnectionSettings />
       <ThemeSettings />
       <ToolSettings />
+      <DataManagement />
       <AboutSection />
     </div>
   );
@@ -207,6 +211,61 @@ function ToolSettings() {
           />
           <span>Developer Mode</span>
         </label>
+      </div>
+    </div>
+  );
+}
+
+function DataManagement() {
+  const { exportConversations, importConversations } = useChatStore();
+  const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const handleExport = async () => {
+    setStatus(null);
+    try {
+      await exportConversations();
+      setStatus({ type: 'success', message: 'Chat history exported successfully' });
+    } catch (err) {
+      setStatus({ type: 'error', message: `Export failed: ${String(err)}` });
+    }
+  };
+
+  const handleImport = async () => {
+    setStatus(null);
+    try {
+      const result = await importConversations();
+      setStatus({ type: 'success', message: `Imported ${result.imported} conversation(s)${result.skipped > 0 ? ` (${result.skipped} duplicates skipped)` : ''}` });
+    } catch (err) {
+      setStatus({ type: 'error', message: `Import failed: ${String(err)}` });
+    }
+  };
+
+  return (
+    <div className="settings-card">
+      <div className="settings-card-header">
+        <Database size={20} />
+        <h3>Data Management</h3>
+      </div>
+      <div className="settings-form">
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
+          Export your conversations to a JSON file, or import previously exported data.
+        </p>
+        <div className="form-actions">
+          <button className="btn btn-secondary" onClick={handleExport}>
+            <Download size={16} />
+            <span>Export History</span>
+          </button>
+          <button className="btn btn-secondary" onClick={handleImport}>
+            <Upload size={16} />
+            <span>Import History</span>
+          </button>
+        </div>
+        {status && (
+          <div className={`test-result ${status.type}`} style={{ marginTop: '8px' }}>
+            {status.type === 'success' ? <CheckCircle size={16} /> : <XCircle size={16} />}
+            <span>{status.message}</span>
+          </div>
+        )}
       </div>
     </div>
   );
