@@ -167,39 +167,25 @@ function ToolSettings() {
         <Wrench size={20} />
         <h3>Tools & Features</h3>
       </div>
-
       <div className="settings-form">
         <label className="checkbox-label">
           <input
             type="checkbox"
-            checked={toolConfig.webSearchEnabled}
-            onChange={(e) => updateToolConfig({ webSearchEnabled: e.target.checked })}
+            checked={toolConfig.enabled}
+            onChange={(e) => updateToolConfig({ enabled: e.target.checked })}
           />
-          <span>Enable Web Search (Jina AI)</span>
+          <span>Enable Tools</span>
         </label>
 
-        {toolConfig.webSearchEnabled && (
-          <div className="form-group">
-            <label>Jina API Key</label>
-            <input
-              type="password"
-              className="input"
-              value={toolConfig.jinaApiKey || ''}
-              onChange={(e) => updateToolConfig({ jinaApiKey: e.target.value || undefined })}
-              placeholder="jina_..."
-            />
-          </div>
-        )}
-
         <div className="form-group">
-          <label>Max Search Results</label>
+          <label>Max Tool Calls per Message</label>
           <input
             type="number"
             className="input"
-            value={toolConfig.maxSearchResults}
-            onChange={(e) => updateToolConfig({ maxSearchResults: parseInt(e.target.value) || 5 })}
+            value={toolConfig.maxToolCalls}
+            onChange={(e) => updateToolConfig({ maxToolCalls: parseInt(e.target.value) || 10 })}
             min={1}
-            max={20}
+            max={50}
           />
         </div>
 

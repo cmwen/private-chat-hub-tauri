@@ -28,6 +28,8 @@ pub fn run() {
             // Chat
             send_message,
             generate_title,
+            // Tools
+            fetch_webpage,
             // Comparison
             compare_models,
         ])

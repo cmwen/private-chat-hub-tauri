@@ -58,6 +58,8 @@ function App() {
         return <SettingsView />;
       case 'projects':
         return <ProjectsView />;
+      case 'project':
+        return <ProjectsView />;
       case 'comparison':
         return <ComparisonView />;
       case 'models':

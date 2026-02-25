@@ -115,10 +115,6 @@ export interface AppSettings {
 
 export interface ToolConfig {
   enabled: boolean;
-  webSearchEnabled: boolean;
-  jinaApiKey?: string;
-  maxSearchResults: number;
-  cacheSearchResults: boolean;
   maxToolCalls: number;
 }
 
@@ -155,4 +151,4 @@ export interface ComparisonResult {
   };
 }
 
-export type View = 'chat' | 'settings' | 'projects' | 'comparison' | 'models';
+export type View = 'chat' | 'settings' | 'projects' | 'project' | 'comparison' | 'models';

@@ -836,9 +836,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     developerMode: false,
     toolConfig: {
       enabled: true,
-      webSearchEnabled: false,
-      maxSearchResults: 5,
-      cacheSearchResults: true,
       maxToolCalls: 10,
     },
   },
@@ -875,3 +872,8 @@ export const useUIStore = create<UIState>((set) => ({
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
   setSidebarWidth: (width) => set({ sidebarWidth: width }),
 }));
+
+// ─── Tool Functions ───
+export async function fetchWebpage(url: string): Promise<{ url: string; status: number; content_type: string; content: string; length: number }> {
+  return invoke('fetch_webpage', { url });
+}

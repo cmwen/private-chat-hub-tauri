@@ -215,6 +215,106 @@ pub async fn generate_title(
     ollama.generate_title(&model, &first_message).await
 }
 
+/// Fetch a web page and return its text content
+#[tauri::command]
+pub async fn fetch_webpage(url: String) -> Result<serde_json::Value, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .user_agent("Mozilla/5.0 (compatible; PrivateChatHub/0.1)")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch URL: {}", e))?;
+
+    let status = response.status().as_u16();
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let body = response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read response body: {}", e))?;
+
+    let text = if content_type.contains("text/html") {
+        strip_html_tags(&body)
+    } else {
+        body
+    };
+
+    let length = text.len();
+
+    Ok(serde_json::json!({
+        "url": url,
+        "status": status,
+        "content_type": content_type,
+        "content": text,
+        "length": length,
+    }))
+}
+
+/// Simple HTML tag stripper
+fn strip_html_tags(html: &str) -> String {
+    let mut result = String::with_capacity(html.len());
+    let mut in_tag = false;
+    let mut in_script = false;
+    let mut in_style = false;
+    let mut last_was_whitespace = false;
+
+    let lower = html.to_lowercase();
+    let chars: Vec<char> = html.chars().collect();
+    let lower_chars: Vec<char> = lower.chars().collect();
+
+    let mut i = 0;
+    while i < chars.len() {
+        if !in_tag && i + 7 < lower_chars.len() && &lower[i..i + 7] == "<script" {
+            in_script = true;
+            in_tag = true;
+        } else if !in_tag && i + 6 < lower_chars.len() && &lower[i..i + 6] == "<style" {
+            in_style = true;
+            in_tag = true;
+        } else if in_script && i + 9 <= lower_chars.len() && &lower[i..i + 9] == "</script>" {
+            in_script = false;
+            i += 9;
+            continue;
+        } else if in_style && i + 8 <= lower_chars.len() && &lower[i..i + 8] == "</style>" {
+            in_style = false;
+            i += 8;
+            continue;
+        } else if chars[i] == '<' {
+            in_tag = true;
+        } else if chars[i] == '>' {
+            in_tag = false;
+            i += 1;
+            continue;
+        }
+
+        if !in_tag && !in_script && !in_style {
+            let ch = chars[i];
+            if ch.is_whitespace() {
+                if !last_was_whitespace {
+                    result.push(' ');
+                    last_was_whitespace = true;
+                }
+            } else {
+                result.push(ch);
+                last_was_whitespace = false;
+            }
+        }
+
+        i += 1;
+    }
+
+    result.trim().to_string()
+}
+
 /// Compare two models with the same prompt
 #[tauri::command]
 pub async fn compare_models(

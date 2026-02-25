@@ -4,8 +4,6 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
-  ChevronDown,
-  ChevronRight as ChevronRightIcon,
   Settings,
   FolderPlus,
   GitCompare,
@@ -13,24 +11,22 @@ import {
   Trash2,
   Wifi,
   WifiOff,
-  Settings2,
 } from 'lucide-react';
 import { useChatStore, useModelStore, useConnectionStore, useUIStore, useProjectStore } from '../../stores';
 import { formatTimestamp, truncate } from '../../utils/format';
 import type { View } from '../../types';
 
 export function Sidebar() {
-  const { sidebarOpen, toggleSidebar, setView } = useUIStore();
+  const { sidebarOpen, toggleSidebar, setView, currentView } = useUIStore();
   const { conversations, activeConversationId, setActiveConversation, createConversation, deleteConversation } = useChatStore();
   const { selectedModel, models } = useModelStore();
   const { isConnected } = useConnectionStore();
-  const { projects, createProject, deleteProject, updateProject } = useProjectStore();
+  const { projects, createProject, deleteProject, setActiveProject, activeProjectId } = useProjectStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [hoveredConv, setHoveredConv] = useState<string | null>(null);
-  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set());
+  const [hoveredProject, setHoveredProject] = useState<string | null>(null);
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
-  const [editingProjectSettings, setEditingProjectSettings] = useState<string | null>(null);
 
   const filteredConversations = searchQuery
     ? conversations.filter(
@@ -40,21 +36,7 @@ export function Sidebar() {
       )
     : conversations;
 
-  const projectConversations = new Map<string | null, typeof filteredConversations>();
-  for (const conv of filteredConversations) {
-    const key = conv.projectId || null;
-    if (!projectConversations.has(key)) projectConversations.set(key, []);
-    projectConversations.get(key)!.push(conv);
-  }
-
-  const toggleProjectCollapse = (projectId: string) => {
-    setCollapsedProjects(prev => {
-      const next = new Set(prev);
-      if (next.has(projectId)) next.delete(projectId);
-      else next.add(projectId);
-      return next;
-    });
-  };
+  const ungroupedConversations = filteredConversations.filter(c => !c.projectId);
 
   if (!sidebarOpen) {
     return (
@@ -157,7 +139,7 @@ export function Sidebar() {
         )}
 
         {/* Ungrouped conversations */}
-        {(projectConversations.get(null) ?? []).map((conv) => (
+        {ungroupedConversations.map((conv) => (
           <div
             key={conv.id}
             className={`conversation-item ${conv.id === activeConversationId ? 'active' : ''}`}
@@ -180,91 +162,32 @@ export function Sidebar() {
           </div>
         ))}
 
-        {/* Project accordions */}
+        {/* Projects section */}
+        {projects.length > 0 && (
+          <div className="sidebar-section-label">Projects</div>
+        )}
         {projects.map((project) => {
-          const convs = projectConversations.get(project.id) ?? [];
-          const isCollapsed = collapsedProjects.has(project.id);
-          const isEditingSettings = editingProjectSettings === project.id;
+          const convCount = conversations.filter(c => c.projectId === project.id).length;
+          const isActive = currentView === 'project' && activeProjectId === project.id;
           return (
-            <div key={project.id} className="sidebar-project-group">
-              <div className="sidebar-project-header" onClick={() => toggleProjectCollapse(project.id)}>
-                {isCollapsed ? <ChevronRightIcon size={12} /> : <ChevronDown size={12} />}
-                <span className="sidebar-project-dot" style={{ background: project.color }} />
-                <span className="sidebar-project-name">{project.name}</span>
-                <span className="sidebar-project-count">{convs.length}</span>
-                <div className="sidebar-project-actions" onClick={(e) => e.stopPropagation()}>
-                  <button className="btn btn-icon btn-xs" onClick={() => setEditingProjectSettings(isEditingSettings ? null : project.id)} title="Project settings">
-                    <Settings2 size={12} />
-                  </button>
-                  <button className="btn btn-icon btn-xs btn-danger" onClick={() => deleteProject(project.id)} title="Delete project">
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              </div>
-              {!isCollapsed && (
-                <>
-                  <button
-                    className="btn btn-sm sidebar-project-new-chat"
-                    onClick={() => {
-                      const model = selectedModel || models[0]?.name || 'llama3';
-                      createConversation(model, project.id);
-                      setView('chat');
-                    }}
-                    disabled={!isConnected || models.length === 0}
-                  >
-                    <MessageSquarePlus size={14} />
-                    <span>New Chat</span>
-                  </button>
-                  {isEditingSettings && (
-                    <div className="sidebar-project-settings" onClick={(e) => e.stopPropagation()}>
-                      <div className="form-group">
-                        <label>System Prompt</label>
-                        <textarea
-                          className="input input-sm"
-                          defaultValue={project.systemPrompt ?? ''}
-                          onBlur={(e) => updateProject(project.id, { systemPrompt: e.target.value.trim() || undefined })}
-                          placeholder="System prompt..."
-                          rows={2}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label>Instructions</label>
-                        <textarea
-                          className="input input-sm"
-                          defaultValue={project.instructions ?? ''}
-                          onBlur={(e) => updateProject(project.id, { instructions: e.target.value.trim() || undefined })}
-                          placeholder="Instructions..."
-                          rows={2}
-                        />
-                      </div>
-                    </div>
-                  )}
-                  {convs.map((conv) => (
-                    <div
-                      key={conv.id}
-                      className={`conversation-item ${conv.id === activeConversationId ? 'active' : ''}`}
-                      onClick={() => { setActiveConversation(conv.id); setView('chat'); }}
-                      onMouseEnter={() => setHoveredConv(conv.id)}
-                      onMouseLeave={() => setHoveredConv(null)}
-                    >
-                      <div className="conversation-item-content">
-                        <div className="conversation-item-title">{truncate(conv.title, 30)}</div>
-                        <div className="conversation-item-meta">
-                          <span className="conversation-item-model">{conv.modelName}</span>
-                          <span className="conversation-item-time">{formatTimestamp(conv.updatedAt)}</span>
-                        </div>
-                      </div>
-                      {hoveredConv === conv.id && (
-                        <button className="btn btn-icon btn-xs btn-danger conversation-delete" onClick={(e) => { e.stopPropagation(); deleteConversation(conv.id); }} title="Delete">
-                          <Trash2 size={14} />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  {convs.length === 0 && (
-                    <div className="sidebar-empty" style={{ padding: '8px 12px', fontSize: '12px' }}>No conversations</div>
-                  )}
-                </>
+            <div
+              key={project.id}
+              className={`sidebar-project-item ${isActive ? 'active' : ''}`}
+              onClick={() => { setActiveProject(project.id); setView('project'); }}
+              onMouseEnter={() => setHoveredProject(project.id)}
+              onMouseLeave={() => setHoveredProject(null)}
+            >
+              <span className="sidebar-project-dot" style={{ background: project.color }} />
+              <span className="sidebar-project-item-name">{truncate(project.name, 24)}</span>
+              <span className="sidebar-project-item-count">{convCount}</span>
+              {hoveredProject === project.id && (
+                <button
+                  className="btn btn-icon btn-xs btn-danger"
+                  onClick={(e) => { e.stopPropagation(); deleteProject(project.id); }}
+                  title="Delete project"
+                >
+                  <Trash2 size={12} />
+                </button>
               )}
             </div>
           );
