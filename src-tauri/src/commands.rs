@@ -373,3 +373,50 @@ pub async fn compare_models(
         },
     }))
 }
+
+// ─── LAN Sync Commands ────────────────────────────────────────────────────────
+
+/// Start the embedded HTTP sync server on the given port.
+#[tauri::command]
+pub async fn start_sync_server(
+    port: u16,
+    pin: Option<String>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    crate::sync_server::start(port, pin, app_handle).await
+}
+
+/// Stop the sync server if it is running.
+#[tauri::command]
+pub fn stop_sync_server() -> Result<(), String> {
+    crate::sync_server::stop();
+    Ok(())
+}
+
+/// Returns true if the sync server is currently running.
+#[tauri::command]
+pub fn is_sync_server_running() -> bool {
+    crate::sync_server::is_running()
+}
+
+/// Returns the primary local LAN IP address (shown to user for pairing).
+#[tauri::command]
+pub fn get_local_ip() -> String {
+    local_ip_address::local_ip()
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|_| "unknown".to_string())
+}
+
+/// Called by the frontend whenever conversations or projects change while the
+/// sync server is running, so the server always serves up-to-date data.
+#[tauri::command]
+pub fn update_sync_data(
+    conversations: Vec<serde_json::Value>,
+    projects: Vec<serde_json::Value>,
+) -> Result<(), String> {
+    let data = crate::sync_server::shared_data();
+    let mut guard = data.lock().map_err(|e| e.to_string())?;
+    guard.conversations = conversations;
+    guard.projects = projects;
+    Ok(())
+}

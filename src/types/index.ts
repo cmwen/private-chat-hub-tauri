@@ -110,12 +110,19 @@ export interface AppSettings {
   defaultModel?: string;
   defaultConnectionId?: string;
   toolConfig: ToolConfig;
+  syncConfig: SyncConfig;
   developerMode: boolean;
 }
 
 export interface ToolConfig {
   enabled: boolean;
   maxToolCalls: number;
+}
+
+export interface SyncConfig {
+  enabled: boolean;
+  port: number;
+  pin?: string;
 }
 
 export interface CloudProvider {

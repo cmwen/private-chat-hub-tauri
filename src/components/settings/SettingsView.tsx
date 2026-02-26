@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import {
   Wifi,
   Moon,
@@ -13,8 +13,11 @@ import {
   Database,
   Download,
   Upload,
+  RefreshCw,
+  Radio,
+  Copy,
 } from 'lucide-react';
-import { useSettingsStore, useConnectionStore, useChatStore } from '../../stores';
+import { useSettingsStore, useConnectionStore, useChatStore, useSyncStore } from '../../stores';
 import type { AppSettings } from '../../types';
 
 export function SettingsView() {
@@ -24,6 +27,7 @@ export function SettingsView() {
       <ConnectionSettings />
       <ThemeSettings />
       <ToolSettings />
+      <LanSyncSettings />
       <DataManagement />
       <AboutSection />
     </div>
@@ -197,6 +201,154 @@ function ToolSettings() {
           />
           <span>Developer Mode</span>
         </label>
+      </div>
+    </div>
+  );
+}
+
+function LanSyncSettings() {
+  const { settings, updateSyncConfig } = useSettingsStore();
+  const { serverRunning, localIp, lastSyncedAt, startServer, stopServer, fetchLocalIp } = useSyncStore();
+  const { syncConfig } = settings;
+
+  const [port, setPort] = useState(syncConfig.port ?? 9876);
+  const [pin, setPin] = useState(syncConfig.pin ?? '');
+  const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    void fetchLocalIp();
+  }, [fetchLocalIp]);
+
+  const handleToggle = async (enabled: boolean) => {
+    setStatus(null);
+    try {
+      if (enabled) {
+        const config = { enabled: true, port, pin: pin || undefined };
+        await startServer(config);
+        updateSyncConfig(config);
+        setStatus({ type: 'success', message: `Sync server started on port ${port}` });
+      } else {
+        await stopServer();
+        updateSyncConfig({ enabled: false });
+        setStatus({ type: 'success', message: 'Sync server stopped' });
+      }
+    } catch (err) {
+      setStatus({ type: 'error', message: String(err) });
+    }
+  };
+
+  const handleSaveConfig = async () => {
+    setStatus(null);
+    const config = { enabled: syncConfig.enabled, port, pin: pin || undefined };
+    updateSyncConfig(config);
+    if (serverRunning) {
+      try {
+        await stopServer();
+        await startServer(config);
+        setStatus({ type: 'success', message: 'Sync server restarted with new settings' });
+      } catch (err) {
+        setStatus({ type: 'error', message: String(err) });
+      }
+    } else {
+      setStatus({ type: 'success', message: 'Settings saved' });
+    }
+  };
+
+  const copyIp = async () => {
+    if (localIp) {
+      await navigator.clipboard.writeText(`${localIp}:${port}`);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  return (
+    <div className="settings-card">
+      <div className="settings-card-header">
+        <Radio size={20} />
+        <h3>LAN Sync</h3>
+        {serverRunning && <span className="sync-badge">● Running</span>}
+      </div>
+      <div className="settings-form">
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+          Sync chat history with the Android app over your local Wi-Fi network.
+          Enable the server here, then connect from the Android app.
+        </p>
+
+        <div className="form-row">
+          <label className="form-label">Enable sync server</label>
+          <label className="toggle-switch">
+            <input
+              type="checkbox"
+              checked={serverRunning}
+              onChange={(e) => void handleToggle(e.target.checked)}
+            />
+            <span className="toggle-slider" />
+          </label>
+        </div>
+
+        <div className="form-row">
+          <label className="form-label">Port</label>
+          <input
+            className="form-input"
+            type="number"
+            value={port}
+            min={1024}
+            max={65535}
+            onChange={(e) => setPort(Number(e.target.value))}
+            style={{ width: '100px' }}
+          />
+        </div>
+
+        <div className="form-row">
+          <label className="form-label">PIN (optional)</label>
+          <input
+            className="form-input"
+            type="text"
+            value={pin}
+            placeholder="Leave blank for no PIN"
+            onChange={(e) => setPin(e.target.value)}
+            style={{ width: '160px' }}
+          />
+        </div>
+
+        {localIp && (
+          <div className="form-row">
+            <label className="form-label">Your IP</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <code style={{ fontSize: '13px', color: 'var(--text-primary)' }}>
+                {localIp}:{port}
+              </code>
+              <button className="btn btn-ghost btn-xs" onClick={() => void copyIp()} title="Copy">
+                {copied ? <CheckCircle size={14} /> : <Copy size={14} />}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {lastSyncedAt && (
+          <div className="form-row">
+            <label className="form-label">Last synced</label>
+            <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+              {new Date(lastSyncedAt).toLocaleString()}
+            </span>
+          </div>
+        )}
+
+        <div className="form-actions">
+          <button className="btn btn-secondary" onClick={() => void handleSaveConfig()}>
+            <RefreshCw size={16} />
+            <span>Apply Settings</span>
+          </button>
+        </div>
+
+        {status && (
+          <div className={`test-result ${status.type}`} style={{ marginTop: '8px' }}>
+            {status.type === 'success' ? <CheckCircle size={16} /> : <XCircle size={16} />}
+            <span>{status.message}</span>
+          </div>
+        )}
       </div>
     </div>
   );

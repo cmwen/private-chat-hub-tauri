@@ -8,6 +8,7 @@ import type {
   Connection,
   Project,
   AppSettings,
+  SyncConfig,
   View,
 } from '../types';
 import { invoke } from '@tauri-apps/api/core';
@@ -236,8 +237,19 @@ export async function hydratePersistedState(): Promise<void> {
 
     useSettingsStore.setState((state) => ({
       ...state,
-      settings: persisted.settings.settings,
+      settings: {
+        ...state.settings,
+        ...persisted.settings.settings,
+        // Ensure new fields always have defaults when loading old persisted state
+        syncConfig: persisted.settings.settings.syncConfig ?? state.settings.syncConfig,
+      },
     }));
+
+    // Auto-start sync server if it was enabled
+    const syncConfig = persisted.settings.settings.syncConfig;
+    if (syncConfig?.enabled) {
+      void useSyncStore.getState().startServer(syncConfig).catch(() => {/* non-fatal */});
+    }
 
     useUIStore.setState((state) => ({
       ...state,
@@ -828,6 +840,7 @@ interface SettingsState {
   settings: AppSettings;
   updateSettings: (updates: Partial<AppSettings>) => void;
   updateToolConfig: (updates: Partial<AppSettings['toolConfig']>) => void;
+  updateSyncConfig: (updates: Partial<SyncConfig>) => void;
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
@@ -837,6 +850,10 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     toolConfig: {
       enabled: true,
       maxToolCalls: 10,
+    },
+    syncConfig: {
+      enabled: false,
+      port: 9876,
     },
   },
 
@@ -850,6 +867,14 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       settings: {
         ...state.settings,
         toolConfig: { ...state.settings.toolConfig, ...updates },
+      },
+    })),
+
+  updateSyncConfig: (updates) =>
+    set((state) => ({
+      settings: {
+        ...state.settings,
+        syncConfig: { ...state.settings.syncConfig, ...updates },
       },
     })),
 }));
@@ -876,4 +901,119 @@ export const useUIStore = create<UIState>((set) => ({
 // ─── Tool Functions ───
 export async function fetchWebpage(url: string): Promise<{ url: string; status: number; content_type: string; content: string; length: number }> {
   return invoke('fetch_webpage', { url });
+}
+
+// ─── Sync Store ───
+interface SyncState {
+  serverRunning: boolean;
+  localIp: string | null;
+  lastSyncedAt: string | null;
+  startServer: (config: SyncConfig) => Promise<void>;
+  stopServer: () => Promise<void>;
+  refreshServerStatus: () => Promise<void>;
+  fetchLocalIp: () => Promise<void>;
+  pushDataToServer: () => Promise<void>;
+}
+
+let syncPushListener: (() => void) | null = null;
+
+export const useSyncStore = create<SyncState>((set) => ({
+  serverRunning: false,
+  localIp: null,
+  lastSyncedAt: null,
+
+  startServer: async (config) => {
+    try {
+      await invoke('start_sync_server', { port: config.port, pin: config.pin ?? null });
+      set({ serverRunning: true });
+      // Push current data to server immediately
+      await useSyncStore.getState().pushDataToServer();
+      // Set up listener for push events from Android
+      if (!syncPushListener) {
+        const { listen } = await import('@tauri-apps/api/event');
+        const unlisten = await listen<{ conversations: Conversation[]; projects: Project[] }>(
+          'sync_push_received',
+          (event) => {
+            mergeSyncPush(event.payload.conversations, event.payload.projects);
+          }
+        );
+        syncPushListener = unlisten;
+      }
+    } catch (err) {
+      throw new Error(`Failed to start sync server: ${String(err)}`);
+    }
+  },
+
+  stopServer: async () => {
+    await invoke('stop_sync_server');
+    set({ serverRunning: false });
+    if (syncPushListener) {
+      syncPushListener();
+      syncPushListener = null;
+    }
+  },
+
+  refreshServerStatus: async () => {
+    const running: boolean = await invoke('is_sync_server_running');
+    set({ serverRunning: running });
+  },
+
+  fetchLocalIp: async () => {
+    const ip: string = await invoke('get_local_ip');
+    set({ localIp: ip });
+  },
+
+  pushDataToServer: async () => {
+    const conversations = useChatStore.getState().conversations;
+    const projects = useProjectStore.getState().projects;
+    await invoke('update_sync_data', { conversations, projects });
+  },
+}));
+
+// Subscribe chat/project stores to keep sync data up-to-date while server runs
+const scheduleSyncDataPush = () => {
+  const { serverRunning, pushDataToServer } = useSyncStore.getState();
+  if (serverRunning) {
+    void pushDataToServer();
+  }
+};
+
+useChatStore.subscribe(scheduleSyncDataPush);
+useProjectStore.subscribe(scheduleSyncDataPush);
+
+// Merge conversations+projects pushed from Android into local state
+function mergeSyncPush(incomingConvs: Conversation[], incomingProjects: Project[]) {
+  if (incomingConvs.length > 0) {
+    useChatStore.setState((state) => {
+      const localMap = new Map(state.conversations.map((c) => [c.id, c]));
+      for (const incoming of incomingConvs) {
+        const local = localMap.get(incoming.id);
+        if (!local || incoming.updatedAt > local.updatedAt) {
+          // Union messages by ID (append-only)
+          const localMsgIds = new Set(local?.messages.map((m) => m.id) ?? []);
+          const mergedMessages = [
+            ...(local?.messages ?? []),
+            ...incoming.messages.filter((m) => !localMsgIds.has(m.id)),
+          ];
+          localMap.set(incoming.id, { ...incoming, messages: mergedMessages });
+        }
+      }
+      return { conversations: Array.from(localMap.values()) };
+    });
+  }
+
+  if (incomingProjects.length > 0) {
+    useProjectStore.setState((state) => {
+      const localMap = new Map(state.projects.map((p) => [p.id, p]));
+      for (const incoming of incomingProjects) {
+        const local = localMap.get(incoming.id);
+        if (!local || incoming.updatedAt > local.updatedAt) {
+          localMap.set(incoming.id, incoming);
+        }
+      }
+      return { projects: Array.from(localMap.values()) };
+    });
+  }
+
+  useSyncStore.setState({ lastSyncedAt: new Date().toISOString() });
 }

@@ -1,6 +1,7 @@
 mod models;
 mod ollama;
 mod commands;
+mod sync_server;
 
 use commands::*;
 
@@ -30,6 +31,12 @@ pub fn run() {
             generate_title,
             // Tools
             fetch_webpage,
+            // LAN Sync
+            start_sync_server,
+            stop_sync_server,
+            is_sync_server_running,
+            get_local_ip,
+            update_sync_data,
             // Comparison
             compare_models,
         ])
