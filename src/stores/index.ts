@@ -998,7 +998,7 @@ function mergeSyncPush(incomingConvs: Conversation[], incomingProjects: Project[
           localMap.set(incoming.id, { ...incoming, messages: mergedMessages });
         }
       }
-      return { conversations: Array.from(localMap.values()) };
+      return { conversations: Array.from(localMap.values()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) };
     });
   }
 

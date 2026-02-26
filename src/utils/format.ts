@@ -39,6 +39,20 @@ export function truncate(str: string, maxLength: number): string {
   return str.slice(0, maxLength - 3) + '...';
 }
 
+/** Strip common markdown syntax for plain-text display (e.g. conversation titles) */
+export function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '$1')   // **bold**
+    .replace(/\*(.+?)\*/g, '$1')        // *italic*
+    .replace(/__(.+?)__/g, '$1')        // __bold__
+    .replace(/_(.+?)_/g, '$1')          // _italic_
+    .replace(/`(.+?)`/g, '$1')          // `code`
+    .replace(/~~(.+?)~~/g, '$1')        // ~~strikethrough~~
+    .replace(/^#{1,6}\s+/gm, '')        // # headings
+    .replace(/\[(.+?)\]\(.+?\)/g, '$1') // [link](url)
+    .trim();
+}
+
 export function getModelFamily(name: string): string {
   const lower = name.toLowerCase();
   if (lower.includes('llama')) return 'Llama';

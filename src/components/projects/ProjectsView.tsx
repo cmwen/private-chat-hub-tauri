@@ -5,7 +5,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useProjectStore, useChatStore, useModelStore, useConnectionStore, useUIStore } from '../../stores';
-import { formatTimestamp } from '../../utils/format';
+import { formatTimestamp, stripMarkdown } from '../../utils/format';
 
 export function ProjectsView() {
   const { projects, activeProjectId, updateProject, deleteProject } = useProjectStore();
@@ -179,7 +179,7 @@ function ProjectConversations({
             onMouseLeave={() => setHoveredConv(null)}
           >
             <div className="project-conversation-item-content">
-              <div className="project-conversation-item-title">{conv.title}</div>
+              <div className="project-conversation-item-title">{stripMarkdown(conv.title)}</div>
               <div className="project-conversation-item-meta">
                 <span>{conv.modelName}</span>
                 <span>{conv.messages.length} messages</span>
