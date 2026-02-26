@@ -23,7 +23,7 @@ jobs:
       matrix:
         include:
           - platform: ubuntu-24.04
-            args: "--bundles deb,appimage"
+            args: "--bundles deb"
           - platform: windows-latest
             args: "--bundles nsis,msi"
           - platform: macos-latest

@@ -1720,6 +1720,40 @@ select.input {
   text-transform: uppercase;
   letter-spacing: 0.5px;
   padding: 12px 20px 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  transition: color 0.15s;
+}
+
+.sidebar-section-label:hover {
+  color: var(--text-secondary);
+}
+
+.sidebar-projects-section {
+  position: sticky;
+  top: 0;
+  background: var(--bg-primary);
+  z-index: 10;
+}
+
+.sidebar-projects-list {
+  animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    max-height: 0;
+  }
+  to {
+    opacity: 1;
+    max-height: 1000px;
+  }
 }
 
 /* ─── Project Detail View ─── */

@@ -70,11 +70,6 @@ impl OllamaClient {
             .map_err(|e| format!("Failed to parse response: {}", e))
     }
 
-    /// Send a chat message with streaming — collects chunks and returns them
-    pub async fn chat_stream(&self, request: &OllamaChatRequest) -> Result<Vec<OllamaChatResponse>, String> {
-        self.chat_stream_with_callback(request, |_| {}).await
-    }
-
     /// Send a chat message with streaming and invoke callback for each parsed chunk
     pub async fn chat_stream_with_callback<F>(
         &self,

@@ -4,6 +4,7 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Settings,
   FolderPlus,
   GitCompare,
@@ -27,6 +28,7 @@ export function Sidebar() {
   const [hoveredProject, setHoveredProject] = useState<string | null>(null);
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
+  const [projectsCollapsed, setProjectsCollapsed] = useState(false);
 
   const filteredConversations = searchQuery
     ? conversations.filter(
@@ -166,34 +168,47 @@ export function Sidebar() {
 
         {/* Projects section */}
         {projects.length > 0 && (
-          <div className="sidebar-section-label">Projects</div>
-        )}
-        {projects.map((project) => {
-          const convCount = conversations.filter(c => c.projectId === project.id).length;
-          const isActive = currentView === 'project' && activeProjectId === project.id;
-          return (
-            <div
-              key={project.id}
-              className={`sidebar-project-item ${isActive ? 'active' : ''}`}
-              onClick={() => { setActiveProject(project.id); setView('project'); }}
-              onMouseEnter={() => setHoveredProject(project.id)}
-              onMouseLeave={() => setHoveredProject(null)}
+          <div className="sidebar-projects-section">
+            <button
+              className="sidebar-section-label"
+              onClick={() => setProjectsCollapsed(!projectsCollapsed)}
+              title={projectsCollapsed ? 'Expand projects' : 'Collapse projects'}
             >
-              <span className="sidebar-project-dot" style={{ background: project.color }} />
-              <span className="sidebar-project-item-name">{truncate(project.name, 24)}</span>
-              <span className="sidebar-project-item-count">{convCount}</span>
-              {hoveredProject === project.id && (
-                <button
-                  className="btn btn-icon btn-xs btn-danger"
-                  onClick={(e) => { e.stopPropagation(); deleteProject(project.id); }}
-                  title="Delete project"
-                >
-                  <Trash2 size={12} />
-                </button>
-              )}
-            </div>
-          );
-        })}
+              <ChevronDown size={14} style={{ transform: projectsCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }} />
+              <span>Projects</span>
+            </button>
+            {!projectsCollapsed && (
+              <div className="sidebar-projects-list">
+                {projects.map((project) => {
+                  const convCount = conversations.filter(c => c.projectId === project.id).length;
+                  const isActive = currentView === 'project' && activeProjectId === project.id;
+                  return (
+                    <div
+                      key={project.id}
+                      className={`sidebar-project-item ${isActive ? 'active' : ''}`}
+                      onClick={() => { setActiveProject(project.id); setView('project'); }}
+                      onMouseEnter={() => setHoveredProject(project.id)}
+                      onMouseLeave={() => setHoveredProject(null)}
+                    >
+                      <span className="sidebar-project-dot" style={{ background: project.color }} />
+                      <span className="sidebar-project-item-name">{truncate(project.name, 24)}</span>
+                      <span className="sidebar-project-item-count">{convCount}</span>
+                      {hoveredProject === project.id && (
+                        <button
+                          className="btn btn-icon btn-xs btn-danger"
+                          onClick={(e) => { e.stopPropagation(); deleteProject(project.id); }}
+                          title="Delete project"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         {filteredConversations.length === 0 && (
           <div className="sidebar-empty">
