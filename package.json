@@ -31,7 +31,7 @@
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
-    "uuid": "^11.1.0",
+    "uuid": "^13.0.0",
     "zustand": "^5.0.5"
   },
   "devDependencies": {
