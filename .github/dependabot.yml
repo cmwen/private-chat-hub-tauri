@@ -1,0 +1,64 @@
+version: 2
+
+updates:
+  # JavaScript / pnpm
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "cmwen"
+    labels:
+      - "dependencies"
+      - "javascript"
+    groups:
+      tauri-plugins:
+        patterns:
+          - "@tauri-apps/*"
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+      dev-dependencies:
+        dependency-type: "development"
+
+  # Rust / Cargo
+  - package-ecosystem: "cargo"
+    directory: "/src-tauri"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "cmwen"
+    labels:
+      - "dependencies"
+      - "rust"
+    groups:
+      tauri:
+        patterns:
+          - "tauri"
+          - "tauri-*"
+      networking:
+        patterns:
+          - "reqwest"
+          - "axum"
+          - "tokio"
+          - "tokio-*"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "cmwen"
+    labels:
+      - "dependencies"
+      - "github-actions"
