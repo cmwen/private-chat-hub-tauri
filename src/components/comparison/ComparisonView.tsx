@@ -5,19 +5,21 @@ import {
   Send,
   Clock,
   Bot,
+  XCircle,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { useModelStore, useConnectionStore } from '../../stores';
-import { formatDuration } from '../../utils/format';
+import { formatDuration, getDisplayModelName } from '../../utils/format';
 import { invoke } from '@tauri-apps/api/core';
 import type { ComparisonResult } from '../../types';
 
 export function ComparisonView() {
   const { models } = useModelStore();
-  const { isConnected } = useConnectionStore();
+  const { isConnected, activeConnection } = useConnectionStore();
+  const comparisonSupported = activeConnection?.backend === 'ollama';
   const [model1, setModel1] = useState(models[0]?.name || '');
   const [model2, setModel2] = useState(models[1]?.name || models[0]?.name || '');
   const [prompt, setPrompt] = useState('');
@@ -77,7 +79,7 @@ export function ComparisonView() {
               onChange={(e) => setModel1(e.target.value)}
             >
               {models.map((m) => (
-                <option key={m.name} value={m.name}>{m.name}</option>
+                <option key={m.name} value={m.name}>{getDisplayModelName(m.name)}</option>
               ))}
             </select>
           </div>
@@ -90,7 +92,7 @@ export function ComparisonView() {
               onChange={(e) => setModel2(e.target.value)}
             >
               {models.map((m) => (
-                <option key={m.name} value={m.name}>{m.name}</option>
+                <option key={m.name} value={m.name}>{getDisplayModelName(m.name)}</option>
               ))}
             </select>
           </div>
@@ -110,7 +112,7 @@ export function ComparisonView() {
         <button
           className="btn btn-primary"
           onClick={handleCompare}
-          disabled={!isConnected || !prompt.trim() || !model1 || !model2 || isComparing}
+          disabled={!isConnected || !comparisonSupported || !prompt.trim() || !model1 || !model2 || isComparing}
         >
           {isComparing ? (
             <><Loader2 size={16} className="spin" /> Comparing...</>
@@ -118,6 +120,11 @@ export function ComparisonView() {
             <><Send size={16} /> Compare</>
           )}
         </button>
+        {!comparisonSupported && (
+          <div className="test-result error" style={{ marginTop: '8px' }}>
+            <XCircle size={16} /> Model comparison is only available with Ollama backend.
+          </div>
+        )}
       </div>
 
       {error && (

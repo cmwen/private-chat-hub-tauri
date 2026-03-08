@@ -16,15 +16,50 @@ import {
   RefreshCw,
   Radio,
   Copy,
+  ListFilter,
 } from 'lucide-react';
-import { useSettingsStore, useConnectionStore, useChatStore, useSyncStore } from '../../stores';
-import type { AppSettings } from '../../types';
+import { useSettingsStore, useConnectionStore, useChatStore, useSyncStore, useModelStore } from '../../stores';
+import type { AppSettings, BackendType } from '../../types';
+
+const BACKEND_DETAILS: Record<
+  BackendType,
+  {
+    label: string;
+    defaultPort: number;
+    connectionName: string;
+    summary: string;
+    failureHint: string;
+  }
+> = {
+  ollama: {
+    label: 'Ollama',
+    defaultPort: 11434,
+    connectionName: 'Local Ollama',
+    summary: 'Best for local models managed directly by Ollama.',
+    failureHint: 'Verify Ollama is running at the selected host and port.',
+  },
+  opencode: {
+    label: 'OpenCode Server',
+    defaultPort: 4096,
+    connectionName: 'OpenCode Server',
+    summary: 'Best for routed cloud and provider-backed models exposed through OpenCode.',
+    failureHint: 'Verify host, port, credentials, and that `opencode serve` is running.',
+  },
+  lmstudio: {
+    label: 'LM Studio',
+    defaultPort: 1234,
+    connectionName: 'LM Studio',
+    summary: 'Best for a local OpenAI-style API served from LM Studio.',
+    failureHint: 'Verify LM Studio has its local server enabled and the selected port matches.',
+  },
+};
 
 export function SettingsView() {
   return (
     <div className="settings-view">
       <h2>Settings</h2>
       <ConnectionSettings />
+      <OpencodeModelPreferencesSettings />
       <ThemeSettings />
       <ToolSettings />
       <LanSyncSettings />
@@ -37,22 +72,56 @@ export function SettingsView() {
 function ConnectionSettings() {
   const { connections, isConnected, isConnecting, connectionError, testConnection, updateConnection } =
     useConnectionStore();
+  const { fetchModels } = useModelStore();
 
-  const defaultConn = connections[0] || { host: 'localhost', port: 11434, useHttps: false };
+  const defaultConn = connections[0] || {
+    backend: 'ollama' as const,
+    host: 'localhost',
+    port: BACKEND_DETAILS.ollama.defaultPort,
+    useHttps: false,
+    username: '',
+    password: '',
+    apiToken: '',
+  };
+  const [backend, setBackend] = useState<BackendType>(defaultConn.backend);
   const [host, setHost] = useState(defaultConn.host);
   const [port, setPort] = useState(defaultConn.port);
   const [useHttps, setUseHttps] = useState(defaultConn.useHttps);
+  const [username, setUsername] = useState(defaultConn.username || 'opencode');
+  const [password, setPassword] = useState(defaultConn.password || '');
+  const [apiToken, setApiToken] = useState(defaultConn.apiToken || '');
+  const [portAutoMessage, setPortAutoMessage] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<'success' | 'error' | null>(null);
+  const backendDetail = BACKEND_DETAILS[backend];
 
   const handleTest = async () => {
     setTestResult(null);
-    const ok = await testConnection(host, port, useHttps);
+    const ok = await testConnection(
+      host,
+      port,
+      useHttps,
+      backend,
+      backend === 'opencode' ? username || undefined : undefined,
+      backend === 'opencode' ? password || undefined : undefined,
+      backend === 'lmstudio' ? apiToken || undefined : undefined,
+    );
     setTestResult(ok ? 'success' : 'error');
     if (ok) {
       const conn = connections[0];
       if (conn) {
-        updateConnection(conn.id, { host, port, useHttps, lastConnectedAt: new Date().toISOString() });
+        updateConnection(conn.id, {
+          backend,
+          host,
+          port,
+          useHttps,
+          username: backend === 'opencode' ? username || undefined : undefined,
+          password: backend === 'opencode' ? password || undefined : undefined,
+          apiToken: backend === 'lmstudio' ? apiToken || undefined : undefined,
+          name: backendDetail.connectionName,
+          lastConnectedAt: new Date().toISOString(),
+        });
       }
+      await fetchModels();
     }
   };
 
@@ -60,13 +129,46 @@ function ConnectionSettings() {
     <div className="settings-card">
       <div className="settings-card-header">
         <Wifi size={20} />
-        <h3>Ollama Connection</h3>
+        <h3>Model Provider Connection</h3>
         <span className={`status-badge ${isConnected ? 'status-connected' : 'status-disconnected'}`}>
           {isConnected ? 'Connected' : 'Disconnected'}
         </span>
       </div>
 
       <div className="settings-form">
+        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+          Default ports: Ollama <strong>11434</strong>, OpenCode <strong>4096</strong>, LM Studio <strong>1234</strong>.
+        </p>
+        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+          {backendDetail.summary}
+        </p>
+
+        <div className="form-row">
+          <div className="form-group">
+            <label>Provider</label>
+            <select
+              className="input"
+              value={backend}
+              onChange={(e) => {
+                const nextBackend = e.target.value as BackendType;
+                setBackend(nextBackend);
+                const currentDefaultPort = BACKEND_DETAILS[backend].defaultPort;
+                if (port === currentDefaultPort) {
+                  const nextDefaultPort = BACKEND_DETAILS[nextBackend].defaultPort;
+                  setPort(nextDefaultPort);
+                  setPortAutoMessage(`Port switched to ${nextDefaultPort} for ${BACKEND_DETAILS[nextBackend].label}`);
+                } else {
+                  setPortAutoMessage(null);
+                }
+              }}
+            >
+              <option value="ollama">Ollama</option>
+              <option value="opencode">OpenCode Server</option>
+              <option value="lmstudio">LM Studio</option>
+            </select>
+          </div>
+        </div>
+
         <div className="form-row">
           <div className="form-group">
             <label>Host</label>
@@ -84,10 +186,64 @@ function ConnectionSettings() {
               type="number"
               className="input"
               value={port}
-              onChange={(e) => setPort(parseInt(e.target.value) || 11434)}
+              onChange={(e) => setPort(parseInt(e.target.value, 10) || backendDetail.defaultPort)}
             />
           </div>
         </div>
+        {portAutoMessage && (
+          <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '-4px', marginBottom: '8px' }}>
+            {portAutoMessage}
+          </p>
+        )}
+
+        {backend === 'opencode' && (
+          <>
+            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
+              Authentication is optional and only needed when OpenCode server password protection is enabled.
+            </p>
+            <div className="form-row">
+              <div className="form-group">
+                <label>Username (optional)</label>
+                <input
+                  type="text"
+                  className="input"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="Defaults to opencode"
+                />
+              </div>
+              <div className="form-group">
+                <label>Password (optional)</label>
+                <input
+                  type="password"
+                  className="input"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Set if OPENCODE_SERVER_PASSWORD is enabled"
+                />
+              </div>
+            </div>
+          </>
+        )}
+        {backend === 'lmstudio' && (
+          <>
+            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
+              API tokens are optional unless you configured authentication in LM Studio or a proxy in front of it.
+            </p>
+            <div className="form-row">
+              <div className="form-group">
+                <label>API Token (optional)</label>
+                <input
+                  type="password"
+                  className="input"
+                  value={apiToken}
+                  onChange={(e) => setApiToken(e.target.value)}
+                  placeholder="Bearer token"
+                />
+              </div>
+            </div>
+          </>
+        )}
 
         <div className="form-row">
           <label className="checkbox-label">
@@ -121,9 +277,114 @@ function ConnectionSettings() {
           {testResult === 'error' && (
             <span className="test-result error">
               <XCircle size={16} /> {connectionError || 'Connection failed'}
+              {` • ${backendDetail.failureHint}`}
             </span>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function OpencodeModelPreferencesSettings() {
+  const { activeConnection } = useConnectionStore();
+  const { models } = useModelStore();
+  const { settings, updatePreferredOpencodeModels } = useSettingsStore();
+  const [query, setQuery] = useState('');
+
+  if (activeConnection?.backend !== 'opencode') {
+    return null;
+  }
+
+  const allModels = models.map((model) => model.name);
+  const preferredModels = settings.preferredOpencodeModels;
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredModels = normalizedQuery
+    ? allModels.filter((name) => name.toLowerCase().includes(normalizedQuery))
+    : allModels;
+
+  const togglePreferredModel = (modelName: string) => {
+    const nextPreferredModels = preferredModels.includes(modelName)
+      ? preferredModels.filter((name) => name !== modelName)
+      : [...preferredModels, modelName];
+    updatePreferredOpencodeModels(nextPreferredModels);
+  };
+
+  const selectFilteredModels = () => {
+    updatePreferredOpencodeModels(Array.from(new Set([...preferredModels, ...filteredModels])));
+  };
+
+  return (
+    <div className="settings-card">
+      <div className="settings-card-header">
+        <ListFilter size={20} />
+        <h3>OpenCode Model Dropdown</h3>
+      </div>
+      <div className="settings-form">
+        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
+          Choose which OpenCode models appear in the chat model selector. Leave empty to show all.
+        </p>
+        <div className="form-group">
+          <label>Search models</label>
+          <input
+            type="text"
+            className="input"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Type to filter models..."
+          />
+        </div>
+        <div className="form-actions" style={{ marginBottom: '8px' }}>
+          <button
+            className="btn btn-secondary"
+            onClick={() => updatePreferredOpencodeModels([])}
+            disabled={preferredModels.length === 0}
+          >
+            Show All
+          </button>
+          <button
+            className="btn btn-secondary"
+            onClick={selectFilteredModels}
+            disabled={filteredModels.length === 0}
+          >
+            Select Filtered
+          </button>
+        </div>
+        <div
+          style={{
+            maxHeight: '220px',
+            overflowY: 'auto',
+            border: '1px solid var(--border-color)',
+            borderRadius: '8px',
+            padding: '8px',
+          }}
+        >
+          {filteredModels.length === 0 ? (
+            <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '12px' }}>
+              No models match your search.
+            </p>
+          ) : (
+            filteredModels.map((modelName) => (
+              <label
+                key={modelName}
+                className="checkbox-label"
+                style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}
+              >
+                <span>{modelName}</span>
+                <input
+                  type="checkbox"
+                  checked={preferredModels.includes(modelName)}
+                  onChange={() => togglePreferredModel(modelName)}
+                />
+              </label>
+            ))
+          )}
+        </div>
+        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '8px' }}>
+          {preferredModels.length === 0
+            ? 'All models are currently visible in chat.'
+            : `${preferredModels.length} preferred model(s) selected.`}
+        </p>
       </div>
     </div>
   );

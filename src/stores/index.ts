@@ -9,6 +9,7 @@ import type {
   Project,
   AppSettings,
   SyncConfig,
+  BackendType,
   View,
 } from '../types';
 import { invoke } from '@tauri-apps/api/core';
@@ -192,6 +193,22 @@ const initStreamingListener = () => {
   });
 };
 
+function resolveBackendForModel(modelName: string, currentBackend?: BackendType): BackendType {
+  if (modelName.startsWith('lmstudio:')) {
+    return 'lmstudio';
+  }
+
+  const { activeConnection } = useConnectionStore.getState();
+  const availableModels = useModelStore.getState().models;
+  const isVisibleInCurrentBackend = availableModels.some((model) => model.name === modelName);
+
+  if (isVisibleInCurrentBackend && activeConnection?.backend) {
+    return activeConnection.backend;
+  }
+
+  return currentBackend ?? activeConnection?.backend ?? 'ollama';
+}
+
 export async function hydratePersistedState(): Promise<void> {
   initPersistenceSubscriptions();
   initStreamingListener();
@@ -205,18 +222,27 @@ export async function hydratePersistedState(): Promise<void> {
       return;
     }
 
-    useConnectionStore.setState((state) => {
-      const connections = persisted.connection.connections?.length
-        ? persisted.connection.connections
-        : state.connections;
-      const activeConnection =
-        connections.find((connection: Connection) => connection.id === persisted.connection.activeConnectionId) ?? null;
-      return {
-        ...state,
-        connections,
-        activeConnection,
-      };
-    });
+    const fallbackConnections = useConnectionStore.getState().connections;
+    const hydratedConnections = (persisted.connection.connections?.length
+      ? persisted.connection.connections
+      : fallbackConnections).map((connection) => ({
+      ...connection,
+      backend: connection.backend ?? 'ollama',
+    }));
+
+    const hydratedActiveConnection =
+      hydratedConnections.find(
+        (connection: Connection) => connection.id === persisted.connection.activeConnectionId
+      ) ?? null;
+
+    useConnectionStore.setState((state) => ({
+      ...state,
+      connections: hydratedConnections,
+      activeConnection: hydratedActiveConnection,
+    }));
+
+    const defaultBackend: BackendType =
+      hydratedActiveConnection?.backend ?? hydratedConnections[0]?.backend ?? 'ollama';
 
     useModelStore.setState((state) => ({
       ...state,
@@ -225,7 +251,10 @@ export async function hydratePersistedState(): Promise<void> {
 
     useChatStore.setState((state) => ({
       ...state,
-      conversations: persisted.chat.conversations ?? [],
+      conversations: (persisted.chat.conversations ?? []).map((conversation) => ({
+        ...conversation,
+        backendType: conversation.backendType ?? defaultBackend,
+      })),
       activeConversationId: persisted.chat.activeConversationId,
     }));
 
@@ -242,6 +271,9 @@ export async function hydratePersistedState(): Promise<void> {
         ...persisted.settings.settings,
         // Ensure new fields always have defaults when loading old persisted state
         syncConfig: persisted.settings.settings.syncConfig ?? state.settings.syncConfig,
+        preferredOpencodeModels: Array.isArray(persisted.settings.settings.preferredOpencodeModels)
+          ? persisted.settings.settings.preferredOpencodeModels
+          : state.settings.preferredOpencodeModels,
       },
     }));
 
@@ -275,7 +307,15 @@ interface ConnectionState {
   addConnection: (conn: Connection) => void;
   removeConnection: (id: string) => void;
   updateConnection: (id: string, updates: Partial<Connection>) => void;
-  testConnection: (host: string, port: number, useHttps: boolean) => Promise<boolean>;
+  testConnection: (
+    host: string,
+    port: number,
+    useHttps: boolean,
+    backend: BackendType,
+    username?: string,
+    password?: string,
+    apiToken?: string
+  ) => Promise<boolean>;
   checkStatus: () => Promise<boolean>;
 }
 
@@ -284,6 +324,7 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     {
       id: uuidv4(),
       name: 'Local Ollama',
+      backend: 'ollama',
       host: 'localhost',
       port: 11434,
       useHttps: false,
@@ -313,20 +354,38 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
       ),
     })),
 
-  testConnection: async (host, port, useHttps) => {
+  testConnection: async (host, port, useHttps, backend, username, password, apiToken) => {
     set({ isConnecting: true, connectionError: null });
     try {
       const result = await invoke<boolean>('test_connection', {
         host,
         port,
         useHttps,
+        backend,
+        username: username ?? null,
+        password: password ?? null,
+        apiToken: apiToken ?? null,
       });
+
+      const fallbackConnection = get().connections.find(
+        (c) => c.host === host && c.port === port && c.backend === backend
+      ) ?? get().connections[0] ?? null;
+
       set({
         isConnected: result,
         isConnecting: false,
-        activeConnection: get().connections.find(
-          (c) => c.host === host && c.port === port
-        ) ?? null,
+        activeConnection: fallbackConnection
+          ? {
+              ...fallbackConnection,
+              backend,
+              host,
+              port,
+              useHttps,
+              username: backend === 'opencode' ? (username || undefined) : undefined,
+              password: backend === 'opencode' ? (password || undefined) : undefined,
+              apiToken: backend === 'lmstudio' ? (apiToken || undefined) : undefined,
+            }
+          : null,
       });
       return result;
     } catch (error) {
@@ -373,7 +432,22 @@ export const useModelStore = create<ModelState>((set) => ({
     set({ isLoading: true, error: null });
     try {
       const models = await invoke<OllamaModel[]>('list_models');
-      set({ models, isLoading: false });
+      set((state) => {
+        const activeBackend = useConnectionStore.getState().activeConnection?.backend;
+        const preferredOpencodeModels = useSettingsStore.getState().settings.preferredOpencodeModels;
+        const hasCurrentSelection = state.selectedModel
+          ? models.some((model) => model.name === state.selectedModel)
+          : false;
+        const preferredSelectedModel = activeBackend === 'opencode' && preferredOpencodeModels.length > 0
+          ? preferredOpencodeModels.find((modelName) => models.some((model) => model.name === modelName)) ?? null
+          : null;
+
+        return {
+          models,
+          isLoading: false,
+          selectedModel: hasCurrentSelection ? state.selectedModel : (preferredSelectedModel ?? models[0]?.name ?? null),
+        };
+      });
     } catch (error) {
       set({ error: String(error), isLoading: false });
     }
@@ -427,6 +501,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const id = uuidv4();
     const now = new Date().toISOString();
     const projectStore = useProjectStore.getState();
+    const activeConnection = useConnectionStore.getState().activeConnection;
+    const backendType: BackendType = activeConnection?.backend ?? 'ollama';
     const project = projectId ? projectStore.projects.find(p => p.id === projectId) : undefined;
     // Combine project system prompt and instructions
     let systemPrompt = project?.systemPrompt;
@@ -439,6 +515,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       id,
       title: 'New Conversation',
       modelName,
+      backendType,
+      backendSessionId: undefined,
       messages: [],
       createdAt: now,
       updatedAt: now,
@@ -557,7 +635,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
         status_message: m.statusMessage ?? null,
       }));
 
-      const result = await invoke<{ content: string; eval_count?: number; total_duration?: number }>('send_message', {
+      const backend = conv.backendType ?? useConnectionStore.getState().activeConnection?.backend ?? 'ollama';
+
+      const result = await invoke<{
+        content: string;
+        eval_count?: number;
+        total_duration?: number;
+        session_id?: string;
+      }>('send_message', {
         model: conv.modelName,
         messages: allMessages,
         systemPrompt: conv.systemPrompt ?? null,
@@ -567,9 +652,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
           top_p: conv.parameters.topP ?? null,
           max_tokens: conv.parameters.maxTokens ?? null,
         },
-        stream: true,
+        stream: backend !== 'opencode',
         requestId,
+        sessionId: conv.backendSessionId ?? null,
+        backend,
       });
+
+      if (result.session_id) {
+        set((s) => ({
+          conversations: s.conversations.map((c) =>
+            c.id === conv.id ? { ...c, backendSessionId: result.session_id } : c
+          ),
+        }));
+      }
 
       const streamedAnyChunks = streamsWithChunks.has(requestId);
       if (!streamedAnyChunks) {
@@ -577,11 +672,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
           conversations: s.conversations.map((c) =>
             c.id === conv.id
               ? {
-                  ...c,
-                  updatedAt: new Date().toISOString(),
-                  messages: c.messages.map((m) =>
-                    m.id === assistantMessageId
-                      ? {
+                   ...c,
+                   updatedAt: new Date().toISOString(),
+                   backendSessionId: result.session_id ?? c.backendSessionId,
+                   messages: c.messages.map((m) =>
+                     m.id === assistantMessageId
+                       ? {
                           ...m,
                           content: result.content,
                           status: 'sent',
@@ -659,7 +755,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   updateConversationModel: (id, model) =>
     set((s) => ({
       conversations: s.conversations.map((c) =>
-        c.id === id ? { ...c, modelName: model } : c
+        c.id === id
+          ? {
+              ...c,
+              modelName: model,
+              backendType: resolveBackendForModel(model, c.backendType),
+              backendSessionId: c.modelName === model ? c.backendSessionId : undefined,
+            }
+          : c
       ),
     })),
 
@@ -841,11 +944,13 @@ interface SettingsState {
   updateSettings: (updates: Partial<AppSettings>) => void;
   updateToolConfig: (updates: Partial<AppSettings['toolConfig']>) => void;
   updateSyncConfig: (updates: Partial<SyncConfig>) => void;
+  updatePreferredOpencodeModels: (models: string[]) => void;
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
   settings: {
     theme: 'system',
+    preferredOpencodeModels: [],
     developerMode: false,
     toolConfig: {
       enabled: true,
@@ -877,6 +982,31 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         syncConfig: { ...state.settings.syncConfig, ...updates },
       },
     })),
+
+  updatePreferredOpencodeModels: (models) => {
+    const preferredOpencodeModels = Array.from(new Set(models));
+    set((state) => ({
+      settings: {
+        ...state.settings,
+        preferredOpencodeModels,
+      },
+    }));
+
+    const activeBackend = useConnectionStore.getState().activeConnection?.backend;
+    if (activeBackend !== 'opencode' || preferredOpencodeModels.length === 0) {
+      return;
+    }
+    const modelState = useModelStore.getState();
+    if (!modelState.selectedModel || preferredOpencodeModels.includes(modelState.selectedModel)) {
+      return;
+    }
+    const fallbackModel = preferredOpencodeModels.find((modelName) =>
+      modelState.models.some((model) => model.name === modelName)
+    );
+    if (fallbackModel) {
+      modelState.setSelectedModel(fallbackModel);
+    }
+  },
 }));
 
 // ─── UI Store ───

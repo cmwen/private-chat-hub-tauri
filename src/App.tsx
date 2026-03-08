@@ -36,7 +36,15 @@ function App() {
 
     const defaultConn = connections.find((c) => c.isDefault) || connections[0];
     if (defaultConn) {
-      testConnection(defaultConn.host, defaultConn.port, defaultConn.useHttps).then((ok) => {
+      testConnection(
+        defaultConn.host,
+        defaultConn.port,
+        defaultConn.useHttps,
+        defaultConn.backend,
+        defaultConn.username,
+        defaultConn.password,
+        defaultConn.apiToken
+      ).then((ok) => {
         if (ok) fetchModels();
       });
     }

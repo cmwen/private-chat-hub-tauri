@@ -1,11 +1,17 @@
 // Types mirroring the Rust models for the frontend
 
+export type BackendType = 'ollama' | 'opencode' | 'lmstudio';
+
 export interface Connection {
   id: string;
   name: string;
+  backend: BackendType;
   host: string;
   port: number;
   useHttps: boolean;
+  username?: string;
+  password?: string;
+  apiToken?: string;
   isDefault: boolean;
   createdAt: string;
   lastConnectedAt?: string;
@@ -53,6 +59,8 @@ export interface Conversation {
   id: string;
   title: string;
   modelName: string;
+  backendType?: BackendType;
+  backendSessionId?: string;
   messages: Message[];
   createdAt: string;
   updatedAt: string;
@@ -109,6 +117,7 @@ export interface AppSettings {
   theme: 'light' | 'dark' | 'system';
   defaultModel?: string;
   defaultConnectionId?: string;
+  preferredOpencodeModels: string[];
   toolConfig: ToolConfig;
   syncConfig: SyncConfig;
   developerMode: boolean;
