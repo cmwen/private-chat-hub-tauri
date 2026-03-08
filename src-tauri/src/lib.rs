@@ -1,5 +1,7 @@
 mod models;
 mod ollama;
+mod lm_studio;
+mod opencode;
 mod commands;
 mod sync_server;
 

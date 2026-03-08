@@ -39,6 +39,23 @@ export function truncate(str: string, maxLength: number): string {
   return str.slice(0, maxLength - 3) + '...';
 }
 
+export function getDisplayModelName(modelName: string): string {
+  if (modelName.startsWith('lmstudio:')) {
+    return modelName.slice('lmstudio:'.length);
+  }
+
+  return modelName;
+}
+
+function getModelSearchText(modelName: string): string {
+  const displayName = getDisplayModelName(modelName).toLowerCase();
+  const leafName = displayName.includes('/')
+    ? displayName.slice(displayName.lastIndexOf('/') + 1)
+    : displayName;
+
+  return `${displayName} ${leafName}`;
+}
+
 /** Strip common markdown syntax for plain-text display (e.g. conversation titles) */
 export function stripMarkdown(text: string): string {
   return text
@@ -54,7 +71,7 @@ export function stripMarkdown(text: string): string {
 }
 
 export function getModelFamily(name: string): string {
-  const lower = name.toLowerCase();
+  const lower = getModelSearchText(name);
   if (lower.includes('llama')) return 'Llama';
   if (lower.includes('gemma')) return 'Gemma';
   if (lower.includes('mistral')) return 'Mistral';
@@ -68,24 +85,33 @@ export function getModelFamily(name: string): string {
 }
 
 export function supportsVision(modelName: string): boolean {
-  const lower = modelName.toLowerCase();
+  const lower = getModelSearchText(modelName);
   return (
     lower.includes('llava') ||
     lower.includes('vision') ||
     lower.includes('bakllava') ||
+    lower.includes('minicpm-v') ||
+    lower.includes('qwen-vl') ||
+    lower.includes('qwen2.5-vl') ||
+    lower.includes('gpt-4o') ||
     (lower.includes('gemma') && lower.includes('3'))
   );
 }
 
 export function supportsTools(modelName: string): boolean {
-  const lower = modelName.toLowerCase();
+  const lower = getModelSearchText(modelName);
   return (
     lower.includes('llama3') ||
     lower.includes('llama-3') ||
+    lower.includes('llama3.1') ||
     lower.includes('mistral') ||
     lower.includes('mixtral') ||
     lower.includes('command-r') ||
+    lower.includes('claude') ||
+    lower.includes('gpt-4.1') ||
+    lower.includes('gpt-4o') ||
     lower.includes('qwen2') ||
+    lower.includes('qwen2.5') ||
     lower.includes('qwen3') ||
     lower.includes('firefunction') ||
     lower.includes('hermes') ||
@@ -94,7 +120,7 @@ export function supportsTools(modelName: string): boolean {
 }
 
 export function supportsCode(modelName: string): boolean {
-  const lower = modelName.toLowerCase();
+  const lower = getModelSearchText(modelName);
   return (
     lower.includes('codellama') ||
     lower.includes('codegemma') ||

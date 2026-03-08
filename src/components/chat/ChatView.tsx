@@ -16,8 +16,8 @@ import {
   Wrench,
   Square,
 } from 'lucide-react';
-import { useChatStore, useModelStore, useConnectionStore } from '../../stores';
-import { formatTime, supportsVision, supportsTools } from '../../utils/format';
+import { useChatStore, useModelStore, useConnectionStore, useSettingsStore } from '../../stores';
+import { formatTime, getDisplayModelName, supportsVision, supportsTools } from '../../utils/format';
 import type { Message, ModelParameters } from '../../types';
 import { PARAMETER_PRESETS } from '../../types';
 import TextareaAutosize from 'react-textarea-autosize';
@@ -36,12 +36,21 @@ export function ChatView() {
   } = useChatStore();
 
   const { models } = useModelStore();
-  const { isConnected } = useConnectionStore();
+  const { isConnected, activeConnection } = useConnectionStore();
+  const { settings } = useSettingsStore();
   const activeConv = conversations.find((c) => c.id === activeConversationId);
   const isSending = activeConv ? sendingConversationIds.has(activeConv.id) : false;
   const isStreaming = activeConv ? streamingConversationIds.has(activeConv.id) : false;
   const modelSupportsVision = activeConv ? supportsVision(activeConv.modelName) : false;
   const modelSupportsTools = activeConv ? supportsTools(activeConv.modelName) : false;
+  const allModelNames = models.map((model) => model.name);
+  const preferredOpencodeModels = settings.preferredOpencodeModels;
+  const visibleModelNames = activeConnection?.backend === 'opencode' && preferredOpencodeModels.length > 0
+    ? allModelNames.filter((modelName) => preferredOpencodeModels.includes(modelName))
+    : allModelNames;
+  const headerModelNames = activeConv && !visibleModelNames.includes(activeConv.modelName)
+    ? [activeConv.modelName, ...visibleModelNames]
+    : visibleModelNames;
 
   if (!activeConv) {
     return <EmptyState />;
@@ -51,7 +60,7 @@ export function ChatView() {
     <div className="chat-view">
       <ChatHeader
         conversation={activeConv}
-        models={models.map((m) => m.name)}
+        models={headerModelNames}
         onModelChange={(model) => updateConversationModel(activeConv.id, model)}
         onDelete={() => deleteConversation(activeConv.id)}
       />
@@ -91,7 +100,7 @@ function EmptyState() {
             Start a New Conversation
           </button>
         ) : (
-          <p className="text-muted">Connect to an Ollama server to begin</p>
+          <p className="text-muted">Connect to a backend server to begin</p>
         )}
       </div>
     </div>
@@ -130,7 +139,7 @@ function ChatHeader({
         >
           {models.map((m) => (
             <option key={m} value={m}>
-              {m}
+              {getDisplayModelName(m)}
             </option>
           ))}
         </select>
@@ -460,7 +469,7 @@ function ChatInput({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={isDisabled ? 'Connect to Ollama to start chatting...' : 'Type a message... (Enter to send, Shift+Enter for new line)'}
+            placeholder={isDisabled ? 'Connect to a backend to start chatting...' : 'Type a message... (Enter to send, Shift+Enter for new line)'}
             disabled={isDisabled}
             minRows={1}
             maxRows={8}

@@ -16,17 +16,24 @@ import {
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useModelStore, useConnectionStore } from '../../stores';
-import { formatFileSize, getModelFamily, getModelCapabilities } from '../../utils/format';
+import {
+  formatFileSize,
+  getDisplayModelName,
+  getModelFamily,
+  getModelCapabilities,
+} from '../../utils/format';
 import type { OllamaModel } from '../../types';
 
 export function ModelsView() {
   const { models, isLoading, error, fetchModels, setSelectedModel, pullModel, deleteModel } =
     useModelStore();
-  const { isConnected } = useConnectionStore();
+  const { isConnected, activeConnection } = useConnectionStore();
   const [pullName, setPullName] = useState('');
   const [isPulling, setIsPulling] = useState(false);
   const [pullStatus, setPullStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [deletingModel, setDeletingModel] = useState<string | null>(null);
+  const activeBackend = activeConnection?.backend ?? 'ollama';
+  const isReadonlyBackend = activeBackend !== 'ollama';
 
   useEffect(() => {
     if (isConnected) {
@@ -76,37 +83,38 @@ export function ModelsView() {
         </button>
       </div>
 
-      {/* Pull Model */}
-      <div className="settings-card">
-        <div className="settings-card-header">
-          <Download size={20} />
-          <h3>Pull Model</h3>
-        </div>
-        <div className="form-row">
-          <input
-            type="text"
-            className="input"
-            value={pullName}
-            onChange={(e) => setPullName(e.target.value)}
-            placeholder="e.g., llama3, mistral, gemma:2b"
-            onKeyDown={(e) => e.key === 'Enter' && handlePull()}
-          />
-          <button
-            className="btn btn-primary"
-            onClick={handlePull}
-            disabled={isPulling || !pullName.trim() || !isConnected}
-          >
-            {isPulling ? <Loader2 size={16} className="spin" /> : <Download size={16} />}
-            <span>{isPulling ? 'Pulling...' : 'Pull'}</span>
-          </button>
-        </div>
-        {pullStatus && (
-          <div className={`pull-status ${pullStatus.type}`}>
-            {pullStatus.type === 'success' ? <CheckCircle size={16} /> : <XCircle size={16} />}
-            <span>{pullStatus.message}</span>
+      {activeBackend === 'ollama' && (
+        <div className="settings-card">
+          <div className="settings-card-header">
+            <Download size={20} />
+            <h3>Pull Model</h3>
           </div>
-        )}
-      </div>
+          <div className="form-row">
+            <input
+              type="text"
+              className="input"
+              value={pullName}
+              onChange={(e) => setPullName(e.target.value)}
+              placeholder="e.g., llama3, mistral, gemma:2b"
+              onKeyDown={(e) => e.key === 'Enter' && handlePull()}
+            />
+            <button
+              className="btn btn-primary"
+              onClick={handlePull}
+              disabled={isPulling || !pullName.trim() || !isConnected}
+            >
+              {isPulling ? <Loader2 size={16} className="spin" /> : <Download size={16} />}
+              <span>{isPulling ? 'Pulling...' : 'Pull'}</span>
+            </button>
+          </div>
+          {pullStatus && (
+            <div className={`pull-status ${pullStatus.type}`}>
+              {pullStatus.type === 'success' ? <CheckCircle size={16} /> : <XCircle size={16} />}
+              <span>{pullStatus.message}</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Model List */}
       {error && <div className="error-banner">{error}</div>}
@@ -117,14 +125,25 @@ export function ModelsView() {
             key={model.name}
             model={model}
             onSelect={() => setSelectedModel(model.name)}
-            onDelete={() => handleDelete(model.name)}
-            isDeleting={deletingModel === model.name}
-          />
-        ))}
+             onDelete={() => handleDelete(model.name)}
+             isDeleting={deletingModel === model.name}
+             readonly={isReadonlyBackend}
+           />
+         ))}
         {models.length === 0 && !isLoading && (
           <div className="empty-state-small">
             <Cpu size={32} strokeWidth={1} />
-            <p>{isConnected ? 'No models found. Pull a model to get started.' : 'Connect to Ollama to see available models.'}</p>
+            <p>
+              {isConnected
+                ? (
+                  activeBackend === 'opencode'
+                    ? 'No OpenCode models found. Connect a provider in OpenCode and retry.'
+                    : activeBackend === 'lmstudio'
+                      ? 'No LM Studio models found. Make sure the local server is enabled and a model is available.'
+                      : 'No models found. Pull a model to get started.'
+                )
+                : 'Connect to a backend to see available models.'}
+            </p>
           </div>
         )}
         {isLoading && (
@@ -155,7 +174,7 @@ function ModelDetailModal({ model, onClose }: { model: OllamaModel; onClose: () 
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3>{model.name}</h3>
+          <h3>{getDisplayModelName(model.name)}</h3>
           <button className="btn-icon" onClick={onClose}><X size={18} /></button>
         </div>
 
@@ -248,11 +267,13 @@ function ModelCard({
   onSelect,
   onDelete,
   isDeleting,
+  readonly,
 }: {
   model: OllamaModel;
   onSelect: () => void;
   onDelete: () => void;
   isDeleting: boolean;
+  readonly: boolean;
 }) {
   const { selectedModel } = useModelStore();
   const [showDetail, setShowDetail] = useState(false);
@@ -264,16 +285,18 @@ function ModelCard({
     <>
       <div className={`model-card ${isSelected ? 'selected' : ''}`} onClick={onSelect}>
         <div className="model-card-header">
-          <h4>{model.name}</h4>
+          <h4>{getDisplayModelName(model.name)}</h4>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             {isSelected && <CheckCircle size={16} className="text-primary" />}
-            <button
-              className="btn-icon"
-              onClick={(e) => { e.stopPropagation(); setShowDetail(true); }}
-              title="View details"
-            >
-              <Info size={16} />
-            </button>
+            {!readonly && (
+              <button
+                className="btn-icon"
+                onClick={(e) => { e.stopPropagation(); setShowDetail(true); }}
+                title="View details"
+              >
+                <Info size={16} />
+              </button>
+            )}
           </div>
         </div>
         <div className="model-card-details">
@@ -310,16 +333,18 @@ function ModelCard({
           >
             Select
           </button>
-          <button
-            className="btn btn-sm btn-danger"
-            onClick={(e) => { e.stopPropagation(); onDelete(); }}
-            disabled={isDeleting}
-          >
-            {isDeleting ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
-          </button>
+          {!readonly && (
+            <button
+              className="btn btn-sm btn-danger"
+              onClick={(e) => { e.stopPropagation(); onDelete(); }}
+              disabled={isDeleting}
+            >
+              {isDeleting ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
+            </button>
+          )}
         </div>
       </div>
-      {showDetail && <ModelDetailModal model={model} onClose={() => setShowDetail(false)} />}
+      {!readonly && showDetail && <ModelDetailModal model={model} onClose={() => setShowDetail(false)} />}
     </>
   );
 }
