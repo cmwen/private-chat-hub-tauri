@@ -1,3 +1,5 @@
+import type { BackendType } from '../types';
+
 export function formatFileSize(bytes: number): string {
   if (bytes === 0) return '0 B';
   const k = 1024;
@@ -45,6 +47,19 @@ export function getDisplayModelName(modelName: string): string {
   }
 
   return modelName;
+}
+
+export function getBackendLabel(backendType?: BackendType): string {
+  switch (backendType) {
+    case 'lmstudio':
+      return 'LM Studio';
+    case 'opencode':
+      return 'OpenCode';
+    case 'ollama':
+      return 'Ollama';
+    default:
+      return 'Unknown';
+  }
 }
 
 function getModelSearchText(modelName: string): string {

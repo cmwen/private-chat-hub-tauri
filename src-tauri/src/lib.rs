@@ -1,8 +1,9 @@
+mod commands;
+mod folder_sync;
+mod lm_studio;
 mod models;
 mod ollama;
-mod lm_studio;
 mod opencode;
-mod commands;
 mod sync_server;
 
 use commands::*;
@@ -39,6 +40,9 @@ pub fn run() {
             is_sync_server_running,
             get_local_ip,
             update_sync_data,
+            prepare_folder_sync,
+            save_folder_sync_snapshot,
+            load_folder_sync_snapshot,
             // Comparison
             compare_models,
         ])

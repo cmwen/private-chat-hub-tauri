@@ -7,9 +7,11 @@ Desktop companion to the [Private Chat Hub](../private-chat-hub) mobile app, reb
 ## Features
 
 - **Ollama Integration** - Connect to local or remote Ollama instances with health monitoring
+- **LM Studio + OpenCode Support** - Switch between multiple backend types from one desktop app
 - **Streaming Chat** - Real-time AI chat with markdown rendering and code highlighting
 - **Conversation Management** - Auto-titled conversations, search, delete, per-conversation settings
 - **Project Workspaces** - Organize conversations into projects with pin/unpin support
+- **Syncthing Folder Mode** - Mirror chat/project history into structured files that can sync across devices
 - **Model Management** - Browse, pull, and delete Ollama models with model details
 - **Model Comparison** - Side-by-side comparison of responses from two models
 - **Parameter Presets** - Balanced, Creative, Precise, and Code presets with manual tuning
@@ -53,6 +55,73 @@ pnpm tauri dev
 pnpm tauri build
 ```
 
+## Validation
+
+The repository currently ships with build verification, but no dedicated `test` script in `package.json`.
+
+```bash
+# Frontend type-check + production build
+pnpm build
+
+# Rust/Tauri backend compile check
+cd src-tauri && cargo check -q
+```
+
+## Folder Mode and Syncthing
+
+Private Chat Hub now supports a **folder-backed mode** intended for tools like Syncthing.
+
+- Enable it from **Settings → Folder Mode (Syncthing)**
+- Choose a folder such as `~/Syncthing/private-chat-hub`
+- When enabled, that folder becomes the **source of truth**
+- The local Tauri store is still written as a **performance cache** for faster startup and recovery
+
+### What gets written
+
+The desktop app stores portable JSON plus attachment files:
+
+```text
+shared-folder/
+  sync-meta.json
+  workspace-state.json
+  conversations/
+    <conversation-id>/
+      meta.json
+      messages.json
+      attachments/
+        <attachment-id>-<name>
+  projects/
+    <project-id>.json
+```
+
+### State restored from another device
+
+Folder mode persists enough metadata to restore the working state in another app or device, including:
+
+- conversation/project IDs
+- titles and timestamps
+- model name and backend type used
+- backend session IDs when available
+- system prompt and sampling parameters
+- message status, token counts, tool calls, and reasoning text
+- attachments as sibling files
+- active conversation/project pointers in `workspace-state.json`
+
+### Safety model
+
+- If a folder write succeeds, the local cache is marked clean and future launches hydrate from the folder snapshot.
+- If a folder write fails, the app keeps the newer local cache and records that there are pending local changes.
+- On the next launch, folder hydration is skipped until the user reviews the data and writes a fresh snapshot.
+- Connection secrets (passwords, API tokens) stay local and are **not** written into the shared folder.
+
+### Recommended Syncthing setup
+
+1. Create one dedicated folder for Private Chat Hub history.
+2. Share that folder to your other devices with Syncthing.
+3. Wait for the initial sync to finish before opening the app elsewhere.
+4. Use **Write Snapshot Now** before switching devices if you want an immediate handoff.
+5. Use **Reload from Folder** when another device has already updated the shared files.
+
 ## Project Structure
 
 ```
@@ -93,6 +162,40 @@ The app uses a clean separation between the Rust backend and React frontend:
 - **Rust Backend** (`src-tauri/`): Handles all Ollama HTTP communication, data models, and system-level operations via Tauri commands
 - **React Frontend** (`src/`): Manages UI state with Zustand stores, renders the desktop UI, and communicates with the backend via `@tauri-apps/api/core` invoke calls
 - **IPC Commands**: `test_connection`, `list_models`, `show_model`, `pull_model`, `delete_model`, `send_message`, `generate_title`, `compare_models`
+
+## Releases and Auto Update
+
+### Current release flow
+
+`.github/workflows/release.yml` builds tagged releases on GitHub Actions and uploads the desktop bundles to GitHub Releases:
+
+- macOS: `dmg`, `app`
+- Windows: `nsis`, `msi`
+- Linux: `deb`
+
+Today this workflow produces installable release artifacts, but the app does **not** yet self-update automatically.
+
+### How Tauri auto update works
+
+Tauri's updater model is:
+
+1. The installed app checks an update endpoint (commonly a GitHub Releases-hosted `latest.json`)
+2. The endpoint points to the newest platform-specific bundle
+3. The bundle is signed with a long-lived Tauri signing key during CI
+4. The app verifies the downloaded signature using the public key embedded in `tauri.conf.json`
+5. If the signature and version are valid, the updater downloads, installs, and relaunches
+
+### What still needs to be added
+
+To turn on auto update for this repo safely, the project still needs:
+
+- the Tauri updater plugin wired into `src-tauri`
+- updater permissions and config in `tauri.conf.json`
+- a stable signing key pair (private key stored in GitHub Actions secrets)
+- release workflow updates so CI publishes signed updater metadata/assets
+- platform signing/notarization strategy, especially for macOS and Windows trust prompts
+
+In short: **GitHub Releases already handles distribution, but auto update requires signed updater metadata plus CI secrets before it should be enabled.**
 
 ## License
 

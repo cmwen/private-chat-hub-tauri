@@ -14,7 +14,7 @@ import {
   WifiOff,
 } from 'lucide-react';
 import { useChatStore, useModelStore, useConnectionStore, useUIStore, useProjectStore } from '../../stores';
-import { formatTimestamp, truncate, stripMarkdown } from '../../utils/format';
+import { formatTimestamp, getBackendLabel, truncate, stripMarkdown } from '../../utils/format';
 import type { View } from '../../types';
 
 export function Sidebar() {
@@ -155,6 +155,10 @@ export function Sidebar() {
               <div className="conversation-item-title">{truncate(stripMarkdown(conv.title), 30)}</div>
               <div className="conversation-item-meta">
                 <span className="conversation-item-model">{conv.modelName}</span>
+                <span className="conversation-item-provider">{getBackendLabel(conv.backendType)}</span>
+                {conv.restoredFromFolder && (
+                  <span className="conversation-item-badge">Synced</span>
+                )}
                 <span className="conversation-item-time">{formatTimestamp(conv.updatedAt)}</span>
               </div>
             </div>

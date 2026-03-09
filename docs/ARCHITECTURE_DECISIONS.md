@@ -17,8 +17,9 @@
 6. [UI Architecture Decisions](#6-ui-architecture-decisions)
 7. [Security Architecture Decisions](#7-security-architecture-decisions)
 8. [Performance Architecture Decisions](#8-performance-architecture-decisions)
-9. [Trade-offs & Alternatives Considered](#9-trade-offs--alternatives-considered)
-10. [Decision Log](#10-decision-log)
+9. [Desktop Persistence & Release Decisions](#9-desktop-persistence--release-decisions)
+10. [Trade-offs & Alternatives Considered](#10-trade-offs--alternatives-considered)
+11. [Decision Log](#11-decision-log)
 
 ---
 
@@ -988,7 +989,67 @@ Future<Uint8List> compressImage(Uint8List bytes) async {
 
 ---
 
-## 9. Trade-offs & Alternatives Considered
+## 9. Desktop Persistence & Release Decisions
+
+### Decision 9.1: Desktop Folder Mode Uses Structured Files as the Source of Truth
+
+**Decision:** When the desktop app enables Folder Mode, a user-selected directory becomes the authoritative history store and the local Tauri store is treated as a cache.
+
+**Rationale:**
+- Syncthing works best with normal files rather than private app databases
+- Another device or app can restore chat/project state from portable JSON
+- The cache can be regenerated from the shared folder when needed
+- This matches user expectations for a "shared folder" mode
+
+**Persisted structure:**
+```text
+shared-folder/
+  sync-meta.json
+  workspace-state.json
+  conversations/<conversation-id>/meta.json
+  conversations/<conversation-id>/messages.json
+  conversations/<conversation-id>/attachments/*
+  projects/<project-id>.json
+```
+
+**Portable metadata carried between devices:**
+- conversation and project IDs
+- created/updated timestamps
+- selected model and backend type
+- backend session IDs when available
+- prompts and inference parameters
+- message status, token counts, tool calls, and reasoning text
+- active conversation/project pointers for restoration
+
+**Safety behavior:**
+- Connection secrets stay local and are not written to the shared folder
+- If a folder write succeeds, the cache is marked clean and startup hydrates from the folder snapshot
+- If a folder write fails, the cache is marked dirty so the app preserves the local state on the next launch until the user writes a fresh snapshot
+
+---
+
+### Decision 9.2: Auto Update Requires Signed Release Infrastructure
+
+**Decision:** Keep GitHub Releases as the distribution path today, but only enable in-app auto update after signed updater metadata and CI secrets exist.
+
+**How Tauri auto update works:**
+1. The installed app checks an endpoint such as a GitHub Releases-hosted `latest.json`
+2. CI publishes platform bundles plus updater metadata for the new version
+3. CI signs those update artifacts with a long-lived Tauri private key
+4. The app verifies the signature using the embedded public key
+5. Only verified bundles are downloaded, installed, and relaunched
+
+**Why this repo is not ready yet:**
+- updater plugin/config is not wired into the desktop app
+- updater permissions are not configured
+- the signing key pair and GitHub Actions secrets are not in place
+- macOS notarization / Windows trust-signing decisions still affect the release UX
+
+**Result:** GitHub Actions can already publish release artifacts, but automatic in-app update should stay disabled until the signing and CI pipeline are production-ready.
+
+---
+
+## 10. Trade-offs & Alternatives Considered
 
 ### Trade-off 9.1: Clean Architecture Boilerplate
 
@@ -1043,7 +1104,7 @@ Future<Uint8List> compressImage(Uint8List bytes) async {
 
 ---
 
-## 10. Decision Log
+## 11. Decision Log
 
 | ID | Decision | Date | Status | Owner |
 |----|----------|------|--------|-------|
@@ -1070,6 +1131,8 @@ Future<Uint8List> compressImage(Uint8List bytes) async {
 | 8.1 | Virtualized message lists | 2025-12-31 | ✅ Approved | @architect |
 | 8.2 | Debounced streaming updates | 2025-12-31 | ✅ Approved | @architect |
 | 8.3 | Image compression before send | 2025-12-31 | ✅ Approved | @architect |
+| 9.1 | Desktop folder mode uses structured files as source of truth | 2026-03-09 | ✅ Approved | @architect |
+| 9.2 | Desktop auto update deferred until signed updater infrastructure exists | 2026-03-09 | ✅ Approved | @architect |
 
 ---
 

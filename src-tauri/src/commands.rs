@@ -839,3 +839,25 @@ pub fn update_sync_data(
     guard.projects = projects;
     Ok(())
 }
+
+#[tauri::command]
+pub fn prepare_folder_sync(
+    base_path: String,
+) -> Result<crate::folder_sync::FolderSyncStatus, String> {
+    crate::folder_sync::prepare_folder_sync(base_path)
+}
+
+#[tauri::command]
+pub fn save_folder_sync_snapshot(
+    base_path: String,
+    snapshot: crate::folder_sync::FolderSyncSnapshot,
+) -> Result<crate::folder_sync::FolderSyncStatus, String> {
+    crate::folder_sync::save_folder_sync_snapshot(base_path, snapshot)
+}
+
+#[tauri::command]
+pub fn load_folder_sync_snapshot(
+    base_path: String,
+) -> Result<crate::folder_sync::FolderSyncSnapshot, String> {
+    crate::folder_sync::load_folder_sync_snapshot(base_path)
+}

@@ -23,12 +23,14 @@ export interface Message {
   content: string;
   timestamp: string;
   modelName?: string;
+  backendType?: BackendType;
   isError: boolean;
   tokenCount?: number;
   attachments: Attachment[];
   toolCalls: ToolCall[];
   status: 'sent' | 'sending' | 'queued' | 'failed' | 'draft';
   statusMessage?: string;
+  reasoning?: string;
 }
 
 export interface Attachment {
@@ -68,6 +70,7 @@ export interface Conversation {
   parameters: ModelParameters;
   projectId?: string;
   toolCallingEnabled: boolean;
+  restoredFromFolder?: boolean;
 }
 
 export interface ModelParameters {
@@ -120,6 +123,7 @@ export interface AppSettings {
   preferredOpencodeModels: string[];
   toolConfig: ToolConfig;
   syncConfig: SyncConfig;
+  folderSyncConfig: FolderSyncConfig;
   developerMode: boolean;
 }
 
@@ -132,6 +136,31 @@ export interface SyncConfig {
   enabled: boolean;
   port: number;
   pin?: string;
+}
+
+export interface FolderSyncConfig {
+  enabled: boolean;
+  basePath?: string;
+}
+
+export interface FolderSyncStatus {
+  schemaVersion: number;
+  basePath: string;
+  conversationCount: number;
+  projectCount: number;
+  activeConversationId?: string | null;
+  activeProjectId?: string | null;
+  lastWrittenAt?: string | null;
+}
+
+export interface FolderSyncSnapshot {
+  schemaVersion: number;
+  basePath: string;
+  conversations: Conversation[];
+  projects: Project[];
+  activeConversationId?: string | null;
+  activeProjectId?: string | null;
+  lastWrittenAt?: string | null;
 }
 
 export interface CloudProvider {

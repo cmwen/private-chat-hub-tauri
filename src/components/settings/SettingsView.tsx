@@ -12,13 +12,21 @@ import {
   Info,
   Database,
   Download,
+  FolderOpen,
   Upload,
   RefreshCw,
   Radio,
   Copy,
   ListFilter,
 } from 'lucide-react';
-import { useSettingsStore, useConnectionStore, useChatStore, useSyncStore, useModelStore } from '../../stores';
+import {
+  useSettingsStore,
+  useConnectionStore,
+  useChatStore,
+  useSyncStore,
+  useModelStore,
+  useFolderSyncStore,
+} from '../../stores';
 import type { AppSettings, BackendType } from '../../types';
 
 const BACKEND_DETAILS: Record<
@@ -63,6 +71,7 @@ export function SettingsView() {
       <ThemeSettings />
       <ToolSettings />
       <LanSyncSettings />
+      <FolderModeSettings />
       <DataManagement />
       <AboutSection />
     </div>
@@ -670,6 +679,205 @@ function DataManagement() {
   );
 }
 
+function FolderModeSettings() {
+  const { settings, updateFolderSyncConfig } = useSettingsStore();
+  const { status, error, prepareFolder, reloadFromFolder, syncNow, clearError } = useFolderSyncStore();
+  const folderConfig = settings.folderSyncConfig;
+  const [actionStatus, setActionStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [busyAction, setBusyAction] = useState<'choose' | 'reload' | 'sync' | 'toggle' | null>(null);
+
+  const chooseFolder = async (): Promise<string | null> => {
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      defaultPath: folderConfig.basePath,
+    });
+
+    if (typeof selected !== 'string') {
+      return null;
+    }
+
+    await prepareFolder(selected);
+    updateFolderSyncConfig({ basePath: selected });
+    return selected;
+  };
+
+  const handleToggle = async (enabled: boolean) => {
+    clearError();
+    setActionStatus(null);
+    setBusyAction('toggle');
+    try {
+      if (enabled) {
+        const basePath = folderConfig.basePath ?? await chooseFolder();
+        if (!basePath) {
+          return;
+        }
+        await prepareFolder(basePath);
+        updateFolderSyncConfig({ enabled: true, basePath });
+        const synced = await syncNow(basePath);
+        setActionStatus({
+          type: 'success',
+          message: `Folder mode enabled. ${synced?.conversationCount ?? 0} conversation(s) are now mirrored to the shared folder.`,
+        });
+      } else {
+        updateFolderSyncConfig({ enabled: false });
+        setActionStatus({
+          type: 'success',
+          message: 'Folder mode disabled. The local cache is now the primary source again.',
+        });
+      }
+    } catch (err) {
+      setActionStatus({ type: 'error', message: String(err) });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleChooseFolder = async () => {
+    clearError();
+    setActionStatus(null);
+    setBusyAction('choose');
+    try {
+      const basePath = await chooseFolder();
+      if (!basePath) {
+        return;
+      }
+      if (folderConfig.enabled) {
+        const synced = await syncNow(basePath);
+        setActionStatus({
+          type: 'success',
+          message: `Folder updated. ${synced?.conversationCount ?? 0} conversation(s) are available for Syncthing to sync.`,
+        });
+      } else {
+        setActionStatus({ type: 'success', message: 'Folder selected. Enable folder mode when you are ready to use it as the source of truth.' });
+      }
+    } catch (err) {
+      setActionStatus({ type: 'error', message: String(err) });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleReload = async () => {
+    clearError();
+    setActionStatus(null);
+    setBusyAction('reload');
+    try {
+      const snapshot = await reloadFromFolder();
+      setActionStatus({
+        type: 'success',
+        message: `Reloaded ${snapshot?.conversations.length ?? 0} conversation(s) and ${snapshot?.projects.length ?? 0} project(s) from the folder.`,
+      });
+    } catch (err) {
+      setActionStatus({ type: 'error', message: String(err) });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleSyncNow = async () => {
+    clearError();
+    setActionStatus(null);
+    setBusyAction('sync');
+    try {
+      const synced = await syncNow();
+      setActionStatus({
+        type: 'success',
+        message: `Snapshot written. Last folder write: ${synced?.lastWrittenAt ? new Date(synced.lastWrittenAt).toLocaleString() : 'just now'}.`,
+      });
+    } catch (err) {
+      setActionStatus({ type: 'error', message: String(err) });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  return (
+    <div className="settings-card">
+      <div className="settings-card-header">
+        <FolderOpen size={20} />
+        <h3>Folder Mode (Syncthing)</h3>
+        {folderConfig.enabled && <span className="sync-badge">● Source of truth</span>}
+      </div>
+      <div className="settings-form">
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+          Store conversations, projects, attachments, and workspace pointers as structured files in a shared folder.
+          When enabled, the folder becomes the source of truth and the local app cache is only used for speed.
+        </p>
+
+        <div className="form-row">
+          <label className="form-label">Enable folder mode</label>
+          <label className="toggle-switch">
+            <input
+              type="checkbox"
+              checked={folderConfig.enabled}
+              onChange={(e) => void handleToggle(e.target.checked)}
+            />
+            <span className="toggle-slider" />
+          </label>
+        </div>
+
+        <div className="form-group">
+          <label>Shared folder</label>
+          <div className="folder-sync-path-row">
+            <input
+              className="input"
+              type="text"
+              value={folderConfig.basePath ?? ''}
+              readOnly
+              placeholder="Choose a folder that Syncthing can sync"
+            />
+            <button className="btn btn-secondary" onClick={() => void handleChooseFolder()} disabled={busyAction !== null}>
+              {busyAction === 'choose' ? <Loader2 size={16} className="spin" /> : <FolderOpen size={16} />}
+              <span>{folderConfig.basePath ? 'Change' : 'Choose'}</span>
+            </button>
+          </div>
+        </div>
+
+        {status && (
+          <div className="folder-sync-summary">
+            <div><strong>Conversations:</strong> {status.conversationCount}</div>
+            <div><strong>Projects:</strong> {status.projectCount}</div>
+            <div><strong>Last write:</strong> {status.lastWrittenAt ? new Date(status.lastWrittenAt).toLocaleString() : 'Not yet written'}</div>
+          </div>
+        )}
+
+        <div className="form-actions">
+          <button className="btn btn-secondary" onClick={() => void handleSyncNow()} disabled={busyAction !== null || !folderConfig.basePath}>
+            {busyAction === 'sync' ? <Loader2 size={16} className="spin" /> : <RefreshCw size={16} />}
+            <span>Write Snapshot Now</span>
+          </button>
+          <button className="btn btn-secondary" onClick={() => void handleReload()} disabled={busyAction !== null || !folderConfig.basePath}>
+            {busyAction === 'reload' ? <Loader2 size={16} className="spin" /> : <Download size={16} />}
+            <span>Reload from Folder</span>
+          </button>
+        </div>
+
+        <div className="folder-sync-tips">
+          <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-secondary)' }}>
+            <strong>Syncthing setup tips</strong>
+          </p>
+          <ol>
+            <li>Create a dedicated folder such as <code>~/Syncthing/private-chat-hub</code>.</li>
+            <li>Add that folder to Syncthing on each device and let the first sync finish before opening the app elsewhere.</li>
+            <li>Keep connection passwords and API tokens local; the shared folder only stores chat/project history plus attachments.</li>
+            <li>Use &ldquo;Write Snapshot Now&rdquo; before closing a device if you want an immediate handoff.</li>
+            <li>If another app or device changed the files, use &ldquo;Reload from Folder&rdquo; to refresh this desktop app.</li>
+          </ol>
+        </div>
+
+        {(actionStatus || error) && (
+          <div className={`test-result ${(actionStatus?.type ?? 'error')}`} style={{ marginTop: '8px' }}>
+            {(actionStatus?.type ?? 'error') === 'success' ? <CheckCircle size={16} /> : <XCircle size={16} />}
+            <span>{actionStatus?.message ?? error}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AboutSection() {
   return (
     <div className="settings-card">
@@ -682,6 +890,10 @@ function AboutSection() {
         <p>Version 0.1.0</p>
         <p>Universal AI Chat Platform - Privacy-first chat with local, self-hosted, and cloud AI models.</p>
         <p className="text-muted">Built with Tauri + React + TypeScript</p>
+        <p className="text-muted">
+          GitHub auto-updates can be added through the Tauri updater plugin, but production releases still need a stable signing key,
+          updater configuration, and GitHub Actions secrets before automatic installs can be safely enabled.
+        </p>
       </div>
     </div>
   );

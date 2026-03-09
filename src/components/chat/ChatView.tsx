@@ -17,8 +17,8 @@ import {
   Square,
 } from 'lucide-react';
 import { useChatStore, useModelStore, useConnectionStore, useSettingsStore } from '../../stores';
-import { formatTime, getDisplayModelName, supportsVision, supportsTools } from '../../utils/format';
-import type { Message, ModelParameters } from '../../types';
+import { formatTime, getBackendLabel, getDisplayModelName, supportsVision, supportsTools } from '../../utils/format';
+import type { BackendType, Message, ModelParameters } from '../../types';
 import { PARAMETER_PRESETS } from '../../types';
 import TextareaAutosize from 'react-textarea-autosize';
 
@@ -64,7 +64,7 @@ export function ChatView() {
         onModelChange={(model) => updateConversationModel(activeConv.id, model)}
         onDelete={() => deleteConversation(activeConv.id)}
       />
-      <MessageList messages={activeConv.messages} isLoading={isSending} />
+      <MessageList messages={activeConv.messages} isLoading={isSending} fallbackBackendType={activeConv.backendType} />
       <ChatInput
         onSend={sendMessage}
         isDisabled={isSending || !isConnected}
@@ -254,9 +254,11 @@ function ConversationSettings({
 function MessageList({
   messages,
   isLoading,
+  fallbackBackendType,
 }: {
   messages: Message[];
   isLoading: boolean;
+  fallbackBackendType?: BackendType;
 }) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -265,10 +267,10 @@ function MessageList({
   }, [messages, isLoading]);
 
   return (
-    <div className="message-list">
-      {messages.map((msg) => (
-        <MessageBubble key={msg.id} message={msg} />
-      ))}
+      <div className="message-list">
+        {messages.map((msg) => (
+          <MessageBubble key={msg.id} message={msg} fallbackBackendType={fallbackBackendType} />
+        ))}
       {isLoading && (
         <div className="message message-assistant">
           <div className="message-avatar">
@@ -285,9 +287,10 @@ function MessageList({
   );
 }
 
-function MessageBubble({ message }: { message: Message }) {
+function MessageBubble({ message, fallbackBackendType }: { message: Message; fallbackBackendType?: BackendType }) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
+  const backendLabel = getBackendLabel(message.backendType ?? fallbackBackendType);
 
   const handleCopy = useCallback(async () => {
     try {
@@ -349,6 +352,9 @@ function MessageBubble({ message }: { message: Message }) {
           <span className="message-time">{formatTime(message.timestamp)}</span>
           {message.modelName && (
             <span className="message-model">{message.modelName}</span>
+          )}
+          {!isUser && (
+            <span className="message-provider">{backendLabel}</span>
           )}
           {message.tokenCount && (
             <span className="message-tokens">{message.tokenCount} tokens</span>

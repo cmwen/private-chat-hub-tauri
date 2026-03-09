@@ -8,6 +8,9 @@ import type {
   Connection,
   Project,
   AppSettings,
+  FolderSyncConfig,
+  FolderSyncSnapshot,
+  FolderSyncStatus,
   SyncConfig,
   BackendType,
   View,
@@ -41,7 +44,15 @@ type PersistedState = {
     sidebarOpen: boolean;
     sidebarWidth: number;
   };
+  persistence?: {
+    folderSync?: {
+      pendingWrite: boolean;
+      lastSuccessfulWriteAt: string | null;
+    };
+  };
 };
+
+type PersistedFolderSyncState = NonNullable<PersistedState['persistence']>['folderSync'];
 
 type ChatStreamChunkEvent = {
   requestId: string;
@@ -53,7 +64,7 @@ type ChatStreamChunkEvent = {
 };
 
 const appStore = new LazyStore('app-state.json');
-const CURRENT_PERSISTENCE_VERSION = 1;
+const CURRENT_PERSISTENCE_VERSION = 2;
 
 let hasHydrated = false;
 let subscriptionsInitialized = false;
@@ -62,6 +73,124 @@ let streamListenerInitialized = false;
 
 const activeStreams = new Map<string, { conversationId: string; assistantMessageId: string; modelName: string }>();
 const streamsWithChunks = new Set<string>();
+
+function normalizeMessage(message: Message, fallbackBackend?: BackendType): Message {
+  return {
+    ...message,
+    backendType: message.backendType ?? fallbackBackend,
+  };
+}
+
+function normalizeConversation(conversation: Conversation, defaultBackend: BackendType, restoredFromFolder = false): Conversation {
+  const backendType = conversation.backendType ?? defaultBackend;
+  return {
+    ...conversation,
+    backendType,
+    restoredFromFolder: restoredFromFolder || conversation.restoredFromFolder || false,
+    messages: (conversation.messages ?? []).map((message) => normalizeMessage(message, backendType)),
+  };
+}
+
+function buildPersistedStatePayload(folderSyncState?: PersistedFolderSyncState): PersistedState {
+  const connectionState = useConnectionStore.getState();
+  const modelState = useModelStore.getState();
+  const chatState = useChatStore.getState();
+  const projectState = useProjectStore.getState();
+  const settingsState = useSettingsStore.getState();
+  const uiState = useUIStore.getState();
+
+  return {
+    version: CURRENT_PERSISTENCE_VERSION,
+    connection: {
+      connections: connectionState.connections,
+      activeConnectionId: connectionState.activeConnection?.id ?? null,
+    },
+    model: {
+      selectedModel: modelState.selectedModel,
+    },
+    chat: {
+      conversations: chatState.conversations,
+      activeConversationId: chatState.activeConversationId,
+    },
+    project: {
+      projects: projectState.projects,
+      activeProjectId: projectState.activeProjectId,
+    },
+    settings: {
+      settings: settingsState.settings,
+    },
+    ui: {
+      currentView: uiState.currentView,
+      sidebarOpen: uiState.sidebarOpen,
+      sidebarWidth: uiState.sidebarWidth,
+    },
+    persistence: {
+      folderSync: {
+        pendingWrite: folderSyncState?.pendingWrite ?? false,
+        lastSuccessfulWriteAt: folderSyncState?.lastSuccessfulWriteAt ?? null,
+      },
+    },
+  };
+}
+
+async function writeLocalCache(payload: PersistedState): Promise<void> {
+  await appStore.set('state', payload);
+  await appStore.save();
+}
+
+function buildFolderSyncSnapshotPayload(basePath: string, payload: PersistedState): FolderSyncSnapshot {
+  return {
+    schemaVersion: 1,
+    basePath,
+    conversations: payload.chat.conversations,
+    projects: payload.project.projects,
+    activeConversationId: payload.chat.activeConversationId,
+    activeProjectId: payload.project.activeProjectId,
+    lastWrittenAt: null,
+  };
+}
+
+function applyFolderSnapshot(snapshot: FolderSyncSnapshot) {
+  const defaultBackend: BackendType =
+    useConnectionStore.getState().activeConnection?.backend ??
+    useConnectionStore.getState().connections[0]?.backend ??
+    'ollama';
+  const normalizedConversations = (snapshot.conversations ?? []).map((conversation) =>
+    normalizeConversation(conversation, conversation.backendType ?? defaultBackend, true)
+  );
+  const normalizedProjects = snapshot.projects ?? [];
+
+  useChatStore.setState((state) => ({
+    ...state,
+    conversations: normalizedConversations,
+    activeConversationId: normalizedConversations.some(
+      (conversation) => conversation.id === snapshot.activeConversationId
+    )
+      ? snapshot.activeConversationId ?? null
+      : null,
+  }));
+
+  useProjectStore.setState((state) => ({
+    ...state,
+    projects: normalizedProjects,
+    activeProjectId: normalizedProjects.some((project) => project.id === snapshot.activeProjectId)
+      ? snapshot.activeProjectId ?? null
+      : null,
+  }));
+
+  useFolderSyncStore.setState({
+    status: {
+      schemaVersion: snapshot.schemaVersion,
+      basePath: snapshot.basePath,
+      conversationCount: normalizedConversations.length,
+      projectCount: normalizedProjects.length,
+      activeConversationId: snapshot.activeConversationId ?? null,
+      activeProjectId: snapshot.activeProjectId ?? null,
+      lastWrittenAt: snapshot.lastWrittenAt ?? null,
+    },
+    error: null,
+  });
+}
 
 const schedulePersist = () => {
   if (!hasHydrated) return;
@@ -77,45 +206,40 @@ const schedulePersist = () => {
 };
 
 const persistState = async () => {
+  const folderConfig = useSettingsStore.getState().settings.folderSyncConfig;
+  const previousFolderStatus = useFolderSyncStore.getState().status;
+
+  if (folderConfig.enabled && folderConfig.basePath) {
+    const pendingPayload = buildPersistedStatePayload({
+      pendingWrite: true,
+      lastSuccessfulWriteAt: previousFolderStatus?.lastWrittenAt ?? null,
+    });
+
+    try {
+      await writeLocalCache(pendingPayload);
+      const status = await invoke<FolderSyncStatus>('save_folder_sync_snapshot', {
+        basePath: folderConfig.basePath,
+        snapshot: buildFolderSyncSnapshotPayload(folderConfig.basePath, pendingPayload),
+      });
+      useFolderSyncStore.setState({ status, error: null });
+      await writeLocalCache(buildPersistedStatePayload({
+        pendingWrite: false,
+        lastSuccessfulWriteAt: status.lastWrittenAt ?? null,
+      }));
+    } catch (error) {
+      console.error('Failed to persist app state', error);
+      useFolderSyncStore.setState({ error: String(error) });
+    }
+    return;
+  }
+
   try {
-    const connectionState = useConnectionStore.getState();
-    const modelState = useModelStore.getState();
-    const chatState = useChatStore.getState();
-    const projectState = useProjectStore.getState();
-    const settingsState = useSettingsStore.getState();
-    const uiState = useUIStore.getState();
-
-    const payload: PersistedState = {
-      version: CURRENT_PERSISTENCE_VERSION,
-      connection: {
-        connections: connectionState.connections,
-        activeConnectionId: connectionState.activeConnection?.id ?? null,
-      },
-      model: {
-        selectedModel: modelState.selectedModel,
-      },
-      chat: {
-        conversations: chatState.conversations,
-        activeConversationId: chatState.activeConversationId,
-      },
-      project: {
-        projects: projectState.projects,
-        activeProjectId: projectState.activeProjectId,
-      },
-      settings: {
-        settings: settingsState.settings,
-      },
-      ui: {
-        currentView: uiState.currentView,
-        sidebarOpen: uiState.sidebarOpen,
-        sidebarWidth: uiState.sidebarWidth,
-      },
-    };
-
-    await appStore.set('state', payload);
-    await appStore.save();
-  } catch {
-    // Non-fatal persistence failure
+    await writeLocalCache(buildPersistedStatePayload({
+      pendingWrite: false,
+      lastSuccessfulWriteAt: null,
+    }));
+  } catch (error) {
+    console.error('Failed to persist app state', error);
   }
 };
 
@@ -215,9 +339,10 @@ export async function hydratePersistedState(): Promise<void> {
 
   if (hasHydrated) return;
 
+  let loadedFromFolder = false;
   try {
     const persisted = await appStore.get<PersistedState>('state');
-    if (!persisted || persisted.version !== CURRENT_PERSISTENCE_VERSION) {
+    if (!persisted || ![1, CURRENT_PERSISTENCE_VERSION].includes(persisted.version)) {
       hasHydrated = true;
       return;
     }
@@ -251,10 +376,9 @@ export async function hydratePersistedState(): Promise<void> {
 
     useChatStore.setState((state) => ({
       ...state,
-      conversations: (persisted.chat.conversations ?? []).map((conversation) => ({
-        ...conversation,
-        backendType: conversation.backendType ?? defaultBackend,
-      })),
+      conversations: (persisted.chat.conversations ?? []).map((conversation) =>
+        normalizeConversation(conversation, defaultBackend)
+      ),
       activeConversationId: persisted.chat.activeConversationId,
     }));
 
@@ -271,11 +395,45 @@ export async function hydratePersistedState(): Promise<void> {
         ...persisted.settings.settings,
         // Ensure new fields always have defaults when loading old persisted state
         syncConfig: persisted.settings.settings.syncConfig ?? state.settings.syncConfig,
+        folderSyncConfig: persisted.settings.settings.folderSyncConfig ?? state.settings.folderSyncConfig,
         preferredOpencodeModels: Array.isArray(persisted.settings.settings.preferredOpencodeModels)
           ? persisted.settings.settings.preferredOpencodeModels
           : state.settings.preferredOpencodeModels,
       },
     }));
+
+    const folderSyncConfig = persisted.settings.settings.folderSyncConfig ?? useSettingsStore.getState().settings.folderSyncConfig;
+    const persistedFolderState = persisted.persistence?.folderSync;
+    if (folderSyncConfig?.basePath) {
+      useFolderSyncStore.setState({
+        status: {
+          schemaVersion: 1,
+          basePath: folderSyncConfig.basePath,
+          conversationCount: (persisted.chat.conversations ?? []).length,
+          projectCount: (persisted.project.projects ?? []).length,
+          activeConversationId: persisted.chat.activeConversationId,
+          activeProjectId: persisted.project.activeProjectId,
+          lastWrittenAt: persistedFolderState?.lastSuccessfulWriteAt ?? null,
+        },
+        error: persistedFolderState?.pendingWrite
+          ? 'Folder sync had unsaved local changes last session, so the local cache was preserved. Review your chats, then write a fresh snapshot.'
+          : null,
+      });
+    }
+    if (folderSyncConfig?.enabled && folderSyncConfig.basePath) {
+      if (!persistedFolderState?.pendingWrite) {
+        try {
+          const snapshot = await invoke<FolderSyncSnapshot>('load_folder_sync_snapshot', {
+            basePath: folderSyncConfig.basePath,
+          });
+          applyFolderSnapshot(snapshot);
+          loadedFromFolder = true;
+        } catch (error) {
+          console.error('Failed to load folder sync snapshot', error);
+          useFolderSyncStore.setState({ error: String(error) });
+        }
+      }
+    }
 
     // Auto-start sync server if it was enabled
     const syncConfig = persisted.settings.settings.syncConfig;
@@ -289,10 +447,20 @@ export async function hydratePersistedState(): Promise<void> {
       sidebarOpen: persisted.ui.sidebarOpen,
       sidebarWidth: persisted.ui.sidebarWidth,
     }));
-  } catch {
-    // Non-fatal hydration failure
+  } catch (error) {
+    console.error('Failed to hydrate persisted state', error);
   } finally {
     hasHydrated = true;
+    if (loadedFromFolder) {
+      try {
+        await writeLocalCache(buildPersistedStatePayload({
+          pendingWrite: false,
+          lastSuccessfulWriteAt: useFolderSyncStore.getState().status?.lastWrittenAt ?? null,
+        }));
+      } catch (error) {
+        console.error('Failed to refresh local cache after folder hydration', error);
+      }
+    }
   }
 }
 
@@ -524,6 +692,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       systemPrompt,
       projectId,
       toolCallingEnabled: false,
+      restoredFromFolder: false,
     };
     set((state) => ({
       conversations: [conversation, ...state.conversations],
@@ -574,6 +743,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       role: 'user',
       content,
       timestamp: new Date().toISOString(),
+      backendType: conv.backendType,
       isError: false,
       attachments: messageAttachments,
       toolCalls: [],
@@ -586,6 +756,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       content: '',
       timestamp: new Date().toISOString(),
       modelName: conv.modelName,
+      backendType: conv.backendType,
       isError: false,
       attachments: [],
       toolCalls: [],
@@ -615,15 +786,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     try {
       // Build messages for API
-      const allMessages = [...conv.messages, userMessage].map((m) => ({
-        id: m.id,
-        role: m.role,
-        content: m.content,
-        timestamp: m.timestamp,
-        model_name: m.modelName ?? null,
-        is_error: m.isError,
-        token_count: m.tokenCount ?? null,
-        attachments: m.attachments.map((a) => ({
+        const allMessages = [...conv.messages, userMessage].map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          timestamp: m.timestamp,
+          model_name: m.modelName ?? null,
+          backend_type: m.backendType ?? null,
+          is_error: m.isError,
+          token_count: m.tokenCount ?? null,
+          attachments: m.attachments.map((a) => ({
           id: a.id,
           name: a.name,
           mime_type: a.mimeType,
@@ -718,6 +890,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         role: 'assistant',
         content: `Error: ${String(error)}`,
         timestamp: new Date().toISOString(),
+        backendType: conv.backendType,
         isError: true,
         attachments: [],
         toolCalls: [],
@@ -865,9 +1038,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
 
       const existingIds = new Set(get().conversations.map(c => c.id));
-      const newConversations = importData.conversations.filter(
-        (c: any) => c && c.id && c.title && c.messages && !existingIds.has(c.id)
-      );
+      const defaultBackend =
+        useConnectionStore.getState().activeConnection?.backend ??
+        useConnectionStore.getState().connections[0]?.backend ??
+        'ollama';
+      const newConversations = importData.conversations
+        .filter((c: any) => c && c.id && c.title && c.messages && !existingIds.has(c.id))
+        .map((conversation: Conversation) => normalizeConversation(conversation, defaultBackend));
       
       if (newConversations.length > 0) {
         set((s) => ({
@@ -944,6 +1121,7 @@ interface SettingsState {
   updateSettings: (updates: Partial<AppSettings>) => void;
   updateToolConfig: (updates: Partial<AppSettings['toolConfig']>) => void;
   updateSyncConfig: (updates: Partial<SyncConfig>) => void;
+  updateFolderSyncConfig: (updates: Partial<FolderSyncConfig>) => void;
   updatePreferredOpencodeModels: (models: string[]) => void;
 }
 
@@ -959,6 +1137,10 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     syncConfig: {
       enabled: false,
       port: 9876,
+    },
+    folderSyncConfig: {
+      enabled: false,
+      basePath: undefined,
     },
   },
 
@@ -980,6 +1162,14 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       settings: {
         ...state.settings,
         syncConfig: { ...state.settings.syncConfig, ...updates },
+      },
+    })),
+
+  updateFolderSyncConfig: (updates) =>
+    set((state) => ({
+      settings: {
+        ...state.settings,
+        folderSyncConfig: { ...state.settings.folderSyncConfig, ...updates },
       },
     })),
 
@@ -1007,6 +1197,60 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       modelState.setSelectedModel(fallbackModel);
     }
   },
+}));
+
+// ─── Folder Sync Store ───
+interface FolderSyncState {
+  status: FolderSyncStatus | null;
+  error: string | null;
+  prepareFolder: (basePath: string) => Promise<FolderSyncStatus>;
+  reloadFromFolder: (basePath?: string) => Promise<FolderSyncSnapshot | null>;
+  syncNow: (basePath?: string) => Promise<FolderSyncStatus | null>;
+  clearError: () => void;
+}
+
+export const useFolderSyncStore = create<FolderSyncState>((set) => ({
+  status: null,
+  error: null,
+
+  prepareFolder: async (basePath) => {
+    const status = await invoke<FolderSyncStatus>('prepare_folder_sync', { basePath });
+    set({ status, error: null });
+    return status;
+  },
+
+  reloadFromFolder: async (overridePath) => {
+    const basePath = overridePath ?? useSettingsStore.getState().settings.folderSyncConfig.basePath;
+    if (!basePath) {
+      throw new Error('Choose a sync folder first.');
+    }
+    const snapshot = await invoke<FolderSyncSnapshot>('load_folder_sync_snapshot', { basePath });
+    applyFolderSnapshot(snapshot);
+    await writeLocalCache(buildPersistedStatePayload({
+      pendingWrite: false,
+      lastSuccessfulWriteAt: snapshot.lastWrittenAt ?? useFolderSyncStore.getState().status?.lastWrittenAt ?? null,
+    }));
+    return snapshot;
+  },
+
+  syncNow: async (overridePath) => {
+    const basePath = overridePath ?? useSettingsStore.getState().settings.folderSyncConfig.basePath;
+    if (!basePath) {
+      throw new Error('Choose a sync folder first.');
+    }
+    const status = await invoke<FolderSyncStatus>('save_folder_sync_snapshot', {
+      basePath,
+      snapshot: buildFolderSyncSnapshotPayload(basePath, buildPersistedStatePayload()),
+    });
+    set({ status, error: null });
+    await writeLocalCache(buildPersistedStatePayload({
+      pendingWrite: false,
+      lastSuccessfulWriteAt: status.lastWrittenAt ?? null,
+    }));
+    return status;
+  },
+
+  clearError: () => set({ error: null }),
 }));
 
 // ─── UI Store ───
@@ -1125,7 +1369,7 @@ function mergeSyncPush(incomingConvs: Conversation[], incomingProjects: Project[
             ...(local?.messages ?? []),
             ...incoming.messages.filter((m) => !localMsgIds.has(m.id)),
           ];
-          localMap.set(incoming.id, { ...incoming, messages: mergedMessages });
+          localMap.set(incoming.id, normalizeConversation({ ...incoming, messages: mergedMessages }, incoming.backendType ?? 'ollama'));
         }
       }
       return { conversations: Array.from(localMap.values()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) };
