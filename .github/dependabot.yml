@@ -1,64 +1,53 @@
 version: 2
 
 updates:
-  # JavaScript / pnpm
+  # JavaScript / pnpm — all npm updates in one PR
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 1
     reviewers:
       - "cmwen"
     labels:
       - "dependencies"
       - "javascript"
     groups:
-      tauri-plugins:
+      all-npm:
         patterns:
-          - "@tauri-apps/*"
-      react:
-        patterns:
-          - "react"
-          - "react-dom"
-          - "@types/react"
-          - "@types/react-dom"
-      dev-dependencies:
-        dependency-type: "development"
+          - "*"
 
-  # Rust / Cargo
+  # Rust / Cargo — all cargo updates in one PR
   - package-ecosystem: "cargo"
     directory: "/src-tauri"
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 1
     reviewers:
       - "cmwen"
     labels:
       - "dependencies"
       - "rust"
     groups:
-      tauri:
+      all-cargo:
         patterns:
-          - "tauri"
-          - "tauri-*"
-      networking:
-        patterns:
-          - "reqwest"
-          - "axum"
-          - "tokio"
-          - "tokio-*"
+          - "*"
 
-  # GitHub Actions
+  # GitHub Actions — all action updates in one PR
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 1
     reviewers:
       - "cmwen"
     labels:
       - "dependencies"
       - "github-actions"
+    groups:
+      all-actions:
+        patterns:
+          - "*"
